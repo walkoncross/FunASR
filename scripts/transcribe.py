@@ -174,6 +174,10 @@ def transcribe_file(model, audio_path: str, args) -> dict:
     if args.merge_vad:
         generate_kwargs["merge_vad"] = True
         generate_kwargs["merge_length_s"] = args.merge_length_s
+    # 禁止 VAD 合并多段送入 batch，避免 Fun-ASR-Nano 报 batch decoding not implemented
+    if args.vad_model:
+        generate_kwargs["batch_size_threshold_s"] = 0
+        generate_kwargs["batch_size_s"] = 0
 
     results, elapsed = _timed(
         f"transcribe {Path(audio_path).name}",
