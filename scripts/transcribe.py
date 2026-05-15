@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import time
@@ -147,6 +148,13 @@ def transcribe_file(model, audio_path: str, args) -> dict:
     text = ""
     if results and isinstance(results, list):
         text = results[0].get("text", "")
+        # SenseVoice 输出含原始标签，需后处理清除
+        if text and re.search(r"<\|(?:zh|en|yue|ja|ko|nospeech)\|>", text):
+            try:
+                from funasr.utils.postprocess_utils import rich_transcription_postprocess
+                text = rich_transcription_postprocess(text)
+            except ImportError:
+                text = re.sub(r"<\|[^|]+\|>", "", text).strip()
 
     return {
         "source": audio_path,

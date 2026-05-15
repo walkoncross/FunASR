@@ -38,6 +38,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import time
@@ -214,13 +215,47 @@ def _split_utterances_by_gap(text: str, timestamps: list, silence_gap_s: float) 
     return [u for u in utterances if u["text"]]
 
 
+_SENSEVOICE_LANG_RE = re.compile(r"<\|(?:zh|en|yue|ja|ko|nospeech)\|>")
+
+
+def _is_sensevoice_output(text: str) -> bool:
+    """检测文本是否包含 SenseVoice 原始标签。"""
+    return bool(_SENSEVOICE_LANG_RE.search(text))
+
+
+def _split_sensevoice_raw(raw_text: str) -> list[str]:
+    """
+    将 SenseVoice 原始输出按 VAD 分段切开（各段由语言标签开头，段间以空格连接）。
+    inference_with_vad 将各 VAD 段文本以 ' ' 拼接（auto_model.py L591）。
+    SenseVoice 每段文本均以 <|lang|> 开头，因此以 ' <|lang_tag|>' 为分隔符切开。
+    返回各段经 rich_transcription_postprocess 处理后的干净文本列表。
+    """
+    try:
+        from funasr.utils.postprocess_utils import rich_transcription_postprocess
+    except ImportError:
+        # 无法导入时直接去除 <|...|> 标签
+        def rich_transcription_postprocess(s):
+            return re.sub(r"<\|[^|]+\|>", "", s).strip()
+
+    # inference_with_vad 将各 VAD 段文本以 ' ' 拼接，每段以语言标签开头，
+    # 因此以 ' <|lang_tag|>' 为分界点切开（使用前瞻断言保留各段首部的语言标签）
+    segments_raw = re.split(r"(?= <\|(?:zh|en|yue|ja|ko|nospeech)\|>)", raw_text)
+    result = []
+    for seg in segments_raw:
+        cleaned = rich_transcription_postprocess(seg.strip())
+        if cleaned:
+            result.append(cleaned)
+    return result
+
+
 def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     """
     转写单声道 wav，返回话语列表。
-    支持两种时间戳格式：
+    支持三种模型输出：
       - paraformer: item["timestamp"] = [[start_ms, end_ms], ...]  字符级
       - Fun-ASR-Nano: item["timestamps"] = [{"start_time":s, "end_time":e}, ...]  token 级（秒）
-    用 --silence-gap 阈值按静音间隔切分为多条话语。
+      - SenseVoice: 无时间戳，文本含 <|lang|><|emo|><|event|><|itn|> 标签
+    用 --silence-gap 阈值按静音间隔切分为多条话语（SenseVoice 按 VAD 段边界切分）。
     """
     generate_kwargs = {}
     if args.hotwords:
@@ -250,6 +285,15 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
         text = item.get("text", "").strip()
         if not text:
             continue
+
+        # SenseVoice 输出含原始标签，无时间戳：按 VAD 分段边界切分
+        if _is_sensevoice_output(text):
+            seg_texts = _split_sensevoice_raw(text)
+            for seg_text in seg_texts:
+                if seg_text:
+                    utterances.append({"text": seg_text, "start": 0.0, "end": 0.0})
+            continue
+
         # paraformer: "timestamp"（字符级 ms 列表）；Fun-ASR-Nano: "timestamps"（token 级秒字典）
         ts = item.get("timestamp") or item.get("timestamps") or []
         segs = _split_utterances_by_gap(text, ts, args.silence_gap)
