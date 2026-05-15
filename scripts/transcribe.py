@@ -59,6 +59,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hotwords", default=None, help="热词字符串，空格分隔")
     parser.add_argument("--enable-update", action="store_true", default=False,
                         help="启用 FunASR 版本检查（默认禁用）")
+    # SenseVoice 专用参数
+    parser.add_argument("--language", default=None,
+                        help="语言代码（SenseVoice）：auto / zh / en / yue / ja / ko / nospeech")
+    parser.add_argument("--use-itn", action="store_true", default=False,
+                        help="启用标点与数字规范化 ITN（SenseVoice）")
+    parser.add_argument("--merge-vad", action="store_true", default=False,
+                        help="合并短 VAD 分段（SenseVoice）")
+    parser.add_argument("--merge-length-s", type=float, default=15.0,
+                        help="合并 VAD 分段的最大时长，秒（SenseVoice，需配合 --merge-vad）")
     return parser.parse_args()
 
 
@@ -119,6 +128,13 @@ def transcribe_file(model, audio_path: str, args) -> dict:
     generate_kwargs = {}
     if args.hotwords:
         generate_kwargs["hotword"] = args.hotwords
+    if args.language:
+        generate_kwargs["language"] = args.language
+    if args.use_itn:
+        generate_kwargs["use_itn"] = True
+    if args.merge_vad:
+        generate_kwargs["merge_vad"] = True
+        generate_kwargs["merge_length_s"] = args.merge_length_s
 
     results, elapsed = _timed(
         f"transcribe {Path(audio_path).name}",
@@ -177,7 +193,8 @@ def main() -> None:
 
     logger.info("[config] model=%s  vad=%s  punc=%s", args.model, args.vad_model, args.punc_model)
     logger.info("[config] hub=%s  device=%s  batch_size=%d", args.hub, args.device, args.batch_size)
-    logger.info("[config] separate_channel=%s", args.separate_channel)
+    logger.info("[config] separate_channel=%s  language=%s  use_itn=%s  merge_vad=%s",
+                args.separate_channel, args.language, args.use_itn, args.merge_vad)
     logger.info("[input]  %s", args.input)
 
     t0 = time.perf_counter()
