@@ -1,0 +1,5 @@
+torch>=1.13
+torchaudio
+modelscope
+huggingface
+huggingface_hub
