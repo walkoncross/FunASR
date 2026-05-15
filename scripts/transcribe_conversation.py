@@ -106,48 +106,101 @@ def load_model(args):
     return AutoModel(**kwargs)
 
 
+def _norm_timestamps(timestamps: list) -> list[tuple[float, float]]:
+    """
+    统一时间戳格式为 (start_ms, end_ms) 的列表。
+    支持两种输入格式：
+      - paraformer:     [[start_ms, end_ms], ...]          单位 ms
+      - Fun-ASR-Nano:   [{"start_time": s, "end_time": e}, ...]  单位 s（经 vad 偏移后）
+    """
+    if not timestamps:
+        return []
+    first = timestamps[0]
+    if isinstance(first, dict):
+        # Fun-ASR-Nano timestamps：单位秒，转为 ms
+        return [(t["start_time"] * 1000, t["end_time"] * 1000) for t in timestamps]
+    else:
+        # paraformer timestamp：已是 ms
+        return [(t[0], t[1]) for t in timestamps]
+
+
 def _split_utterances_by_gap(text: str, timestamps: list, silence_gap_s: float) -> list[dict]:
     """
-    将字符级 timestamp [[start_ms, end_ms], ...] 按静音间隔切分成多条话语。
-    text 中每个字符对应 timestamps 中一个元素（FunASR paraformer 输出保证对齐）。
+    将 token 级时间戳按静音间隔切分成多条话语。
+    支持 paraformer ([[start_ms, end_ms]]) 和 Fun-ASR-Nano ([{"start_time":s,"end_time":e}]) 格式。
+    text 中每个 token 对应 timestamps 中一个元素。
     """
     if not timestamps:
         return [{"text": text, "start": 0.0, "end": 0.0}] if text else []
 
+    norm_ts = _norm_timestamps(timestamps)
     silence_gap_ms = silence_gap_s * 1000.0
     utterances = []
-    seg_chars: list[str] = []
-    seg_start_ms: float = timestamps[0][0]
-    prev_end_ms: float = timestamps[0][1]
+    seg_tokens: list[str] = []
+    seg_start_ms: float = norm_ts[0][0]
+    prev_end_ms: float = norm_ts[0][1]
 
-    chars = list(text)  # 字符列表，与 timestamps 对齐
-    # 若字符数与 timestamp 数不匹配，按最短截断
-    n = min(len(chars), len(timestamps))
+    # Fun-ASR-Nano timestamps 的 token 是子词/字，text 是最终文本，长度可能不等。
+    # 此时只用时间戳划出时间边界，不做字符对齐——按 gap 切出若干时间段，
+    # 再把完整 text 按段数均分（退化方案）。
+    # paraformer 保证字符与时间戳一一对齐，可以精确切分。
+    chars = list(text)
+    char_aligned = (len(chars) == len(norm_ts))
 
-    for i in range(n):
-        start_ms, end_ms = timestamps[i]
-        gap = start_ms - prev_end_ms
-
-        if seg_chars and gap >= silence_gap_ms:
-            # 切断：保存当前句
+    if char_aligned:
+        # 精确模式：逐字符切分（paraformer）
+        n = len(norm_ts)
+        for i in range(n):
+            start_ms, end_ms = norm_ts[i]
+            gap = start_ms - prev_end_ms
+            if seg_tokens and gap >= silence_gap_ms:
+                utterances.append({
+                    "text": "".join(seg_tokens).strip(),
+                    "start": round(seg_start_ms / 1000.0, 3),
+                    "end": round(prev_end_ms / 1000.0, 3),
+                })
+                seg_tokens = []
+                seg_start_ms = start_ms
+            seg_tokens.append(chars[i])
+            prev_end_ms = end_ms
+        if seg_tokens:
             utterances.append({
-                "text": "".join(seg_chars).strip(),
+                "text": "".join(seg_tokens).strip(),
                 "start": round(seg_start_ms / 1000.0, 3),
                 "end": round(prev_end_ms / 1000.0, 3),
             })
-            seg_chars = []
-            seg_start_ms = start_ms
+    else:
+        # 时间边界模式：按 gap 切出时间段列表，text 不拆分（Fun-ASR-Nano）
+        # 先找出所有切断点对应的时间范围
+        seg_ranges: list[tuple[float, float]] = []  # (start_ms, end_ms)
+        seg_start_ms = norm_ts[0][0]
+        prev_end_ms = norm_ts[0][1]
+        for start_ms, end_ms in norm_ts[1:]:
+            gap = start_ms - prev_end_ms
+            if gap >= silence_gap_ms:
+                seg_ranges.append((seg_start_ms, prev_end_ms))
+                seg_start_ms = start_ms
+            prev_end_ms = end_ms
+        seg_ranges.append((seg_start_ms, prev_end_ms))
 
-        seg_chars.append(chars[i])
-        prev_end_ms = end_ms
-
-    # 最后一段
-    if seg_chars:
-        utterances.append({
-            "text": "".join(seg_chars).strip(),
-            "start": round(seg_start_ms / 1000.0, 3),
-            "end": round(prev_end_ms / 1000.0, 3),
-        })
+        if len(seg_ranges) == 1:
+            # 无切断点，整段作为一条话语
+            utterances.append({
+                "text": text.strip(),
+                "start": round(seg_ranges[0][0] / 1000.0, 3),
+                "end": round(seg_ranges[0][1] / 1000.0, 3),
+            })
+        else:
+            # inference_with_vad 将各 VAD 分段文本以空格拼接（auto_model.py L591）
+            # 因此按空格拆分后与 seg_ranges 一一对应
+            parts = text.split(" ")
+            for idx, (s_ms, e_ms) in enumerate(seg_ranges):
+                seg_text = parts[idx].strip() if idx < len(parts) else ""
+                utterances.append({
+                    "text": seg_text,
+                    "start": round(s_ms / 1000.0, 3),
+                    "end": round(e_ms / 1000.0, 3),
+                })
 
     return [u for u in utterances if u["text"]]
 
@@ -155,8 +208,10 @@ def _split_utterances_by_gap(text: str, timestamps: list, silence_gap_s: float) 
 def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     """
     转写单声道 wav，返回话语列表。
-    FunASR paraformer + fsmn-vad 返回 1 条结果，timestamp 为字符级 [[start_ms, end_ms], ...]。
-    用 --silence-gap 阈值将字符级时间戳重新切分为多条话语。
+    支持两种时间戳格式：
+      - paraformer: item["timestamp"] = [[start_ms, end_ms], ...]  字符级
+      - Fun-ASR-Nano: item["timestamps"] = [{"start_time":s, "end_time":e}, ...]  token 级（秒）
+    用 --silence-gap 阈值按静音间隔切分为多条话语。
     """
     generate_kwargs = {}
     if args.hotwords:
@@ -177,10 +232,11 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
 
     for item in results:
         text = item.get("text", "").strip()
-        ts = item.get("timestamp")
         if not text:
             continue
-        segs = _split_utterances_by_gap(text, ts or [], args.silence_gap)
+        # paraformer: "timestamp"（字符级 ms 列表）；Fun-ASR-Nano: "timestamps"（token 级秒字典）
+        ts = item.get("timestamp") or item.get("timestamps") or []
+        segs = _split_utterances_by_gap(text, ts, args.silence_gap)
         utterances.extend(segs)
 
     return utterances
