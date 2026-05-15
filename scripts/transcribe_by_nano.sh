@@ -6,6 +6,6 @@ input=$1
 python transcribe.py \
   -i "$input" \
   -d mps \
-  -m ~/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-Nano-2512 \
+  -m FunAudioLLM/Fun-ASR-Nano-2512 \
   --vad-model fsmn-vad \
   --punc-model ""
