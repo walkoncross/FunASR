@@ -82,12 +82,19 @@ def load_model(args):
 
     kwargs = dict(
         model=args.model,
-        vad_model=args.vad_model,
-        punc_model=args.punc_model,
         device=args.device,
         batch_size=args.batch_size,
         disable_update=not args.enable_update,
     )
+    # 空字符串视为不传，避免 AutoModel 尝试构建空模型名导致报错
+    if args.vad_model:
+        kwargs["vad_model"] = args.vad_model
+        if args.vad_model == "fsmn-vad":
+            logger.info("使用内置 fsmn-vad 模型")
+            kwargs["vad_kwargs"] = {"max_single_segment_time": 30000}
+    if args.punc_model:
+        kwargs["punc_model"] = args.punc_model
+
     if args.hub == "hf":
         kwargs["hub"] = "hf"
         logger.info("使用 HuggingFace Hub 加载模型")
@@ -154,6 +161,13 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     generate_kwargs = {}
     if args.hotwords:
         generate_kwargs["hotword"] = args.hotwords
+    # 强制每个 VAD segment 单独推理：
+    # - batch_size_threshold_s=0：禁止多 segment 合并成 batch
+    # - batch_size_s=0：使 inference_with_vad 内部 batch_size=1（毫秒粒度→样本数=1）
+    # 避免 Fun-ASR-Nano 等不支持 batch decoding 的模型报错
+    if args.vad_model:
+        generate_kwargs["batch_size_threshold_s"] = 0
+        generate_kwargs["batch_size_s"] = 0
 
     results = model.generate(input=wav_path, **generate_kwargs)
 

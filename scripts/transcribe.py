@@ -89,12 +89,15 @@ def load_model(args) -> "AutoModel":
 
     kwargs = dict(
         model=args.model,
-        vad_model=args.vad_model,
-        punc_model=args.punc_model,
         device=args.device,
         batch_size=args.batch_size,
         disable_update=not args.enable_update,
     )
+    # 空字符串视为不传，避免 AutoModel 尝试构建空模型名导致报错
+    if args.vad_model:
+        kwargs["vad_model"] = args.vad_model
+    if args.punc_model:
+        kwargs["punc_model"] = args.punc_model
 
     if args.hub == "hf":
         # HuggingFace Hub：需要 model_id 形如 "funasr/paraformer-zh"
