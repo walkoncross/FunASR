@@ -12,7 +12,6 @@ Usage:
   --punc-model/-pm        标点模型名称或路径，留空则不加标点 (default: ct-punc)
   --input/-i              音频文件或目录（必填）
   --output/-o             输出目录 (default: ./results/)
-  --output-format/-f      输出格式: txt / json (default: json)
   --hub                   模型来源: modelscope / hf (default: modelscope)
   --device/-d             推理设备: cpu / cuda:0 / mps (default: cpu)
   --chunk-size            流式分块配置 [lookahead, chunk, shift]，单位帧(60ms)
@@ -70,8 +69,6 @@ def parse_args() -> argparse.Namespace:
                         help="标点模型名称或路径，留空则跳过标点恢复")
     parser.add_argument("--input", "-i", required=True, help="音频文件或目录")
     parser.add_argument("--output", "-o", default="./results/", help="输出目录")
-    parser.add_argument("--output-format", "-f", default="json", choices=["txt", "json"],
-                        help="输出格式")
     parser.add_argument("--hub", default="modelscope", choices=["modelscope", "hf"],
                         help="模型来源：modelscope 或 hf（HuggingFace）")
     parser.add_argument("--device", "-d", default="cpu",
@@ -188,17 +185,10 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
     }
 
 
-def save_result(result: dict, audio_path: Path, output_dir: Path, fmt: str):
+def save_result(result: dict, audio_path: Path, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
-    base = audio_path.stem
-
-    if fmt == "json":
-        out_path = output_dir / f"{base}.streaming.json"
-        out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    else:
-        out_path = output_dir / f"{base}.streaming.txt"
-        out_path.write_text(result["text"], encoding="utf-8")
-
+    out_path = output_dir / f"{audio_path.stem}.streaming.json"
+    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("[output] 已保存: %s", out_path)
     return out_path
 
@@ -241,7 +231,7 @@ def main() -> None:
         logger.info("\n[%d/%d] 处理: %s", i, len(files), f.name)
         result = transcribe_streaming(model, str(f), args)
         logger.info("[result] RTF=%.4f  文本: %s", result["rtf"] or 0, result["text"])
-        save_result(result, f, output_dir, args.output_format)
+        save_result(result, f, output_dir)
 
         total_audio_s += result["audio_dur_s"]
         total_transcribe_s += result["transcribe_s"]

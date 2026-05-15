@@ -42,7 +42,6 @@ python scripts/transcribe.py -i <音频文件或目录> [OPTIONS]
 |------|------|--------|------|
 | `--input` | `-i` | 必填 | 音频文件或目录 |
 | `--output` | `-o` | `./results/` | 输出目录 |
-| `--output-format` | `-f` | `json` | 输出格式：`txt` / `json` |
 | `--model` | `-m` | `paraformer-zh` | ASR 模型名称或本地路径 |
 | `--vad-model` | `-vm` | `fsmn-vad` | VAD 模型名称或路径，留空则禁用 |
 | `--punc-model` | `-pm` | `ct-punc` | 标点模型名称或路径，留空则禁用 |
@@ -56,16 +55,15 @@ python scripts/transcribe.py -i <音频文件或目录> [OPTIONS]
 | `--use-itn` | | `False` | 启用标点与数字规范化 ITN（SenseVoice） |
 | `--merge-vad` | | `False` | 合并短 VAD 分段（SenseVoice） |
 | `--merge-length-s` | | `15.0` | 合并 VAD 分段的最大时长，秒（需配合 `--merge-vad`） |
-| `--timestamp` | | `False` | 在 JSON 中包含每条识别结果的开始/结束时间（秒） |
 
 ### 示例
 
 ```bash
-# 转写单个文件（默认输出 JSON 到 ./results/）
+# 转写单个文件（输出 JSON 到 ./results/）
 python scripts/transcribe.py -i audio.wav
 
-# 批量转写目录，输出 txt
-python scripts/transcribe.py -i ./audio_dir/ -f txt
+# 批量转写目录
+python scripts/transcribe.py -i ./audio_dir/
 
 # 分离双声道，使用 MPS 加速
 python scripts/transcribe.py -i stereo.wav -sc -d mps
@@ -87,9 +85,9 @@ python scripts/transcribe.py -i audio.wav \
 
 ### 输出格式
 
-**txt**：纯文本，每条识别结果占一行，对应 `<stem>.funasr.txt`。
+统一输出 JSON，文件名为 `<stem>.funasr.json`。
 
-**json**（默认，`--timestamp` 未启用）：
+**默认（无 `--timestamp`）**：
 ```json
 {
   "source": "/path/to/audio.wav",
@@ -104,7 +102,7 @@ python scripts/transcribe.py -i audio.wav \
 }
 ```
 
-**json**（`--timestamp` 启用）：
+**启用 `--timestamp`**：
 ```json
 {
   "source": "/path/to/audio.wav",
@@ -208,7 +206,6 @@ python scripts/transcribe_streaming.py -i <音频文件或目录> [OPTIONS]
 |------|------|--------|------|
 | `--input` | `-i` | 必填 | 音频文件或目录 |
 | `--output` | `-o` | `./results/` | 输出目录 |
-| `--output-format` | `-f` | `json` | 输出格式：`txt` / `json` |
 | `--model` | `-m` | `paraformer-zh-streaming` | 流式 ASR 模型名称或本地路径 |
 | `--punc-model` | `-pm` | `ct-punc` | 标点模型名称或路径，留空则禁用 |
 | `--hub` | | `modelscope` | 模型来源：`modelscope` / `hf` |
