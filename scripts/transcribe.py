@@ -9,11 +9,12 @@ Usage:
   --vad-model/-vm     VAD 模型名称或路径 (default: fsmn-vad)
   --punc-model/-pm    标点模型名称或路径 (default: ct-punc)
   --input/-i          音频文件或目录（必填）
-  --output/-o         输出目录 (default: 与输入文件同目录)
+  --output/-o         输出目录 (default: ./results/)
   --output-format/-f  输出格式: txt / json (default: txt)
   --hub               模型来源: modelscope / hf (default: modelscope)
   --device/-d         推理设备: cpu / cuda:0 / mps (default: cpu)
   --batch-size/-bs    推理 batch size (default: 1)
+  --separate-channel/-sc  分离声道分别转录
   --hotwords          热词字符串，空格分隔
   --disable-update    禁用 FunASR 版本检查
 """
@@ -23,6 +24,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -45,13 +47,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vad-model", "-vm", default="fsmn-vad", help="VAD 模型名称或路径")
     parser.add_argument("--punc-model", "-pm", default="ct-punc", help="标点模型名称或路径")
     parser.add_argument("--input", "-i", required=True, help="音频文件或目录")
-    parser.add_argument("--output", "-o", default=None, help="输出目录（默认与输入同目录）")
+    parser.add_argument("--output", "-o", default="./results/", help="输出目录")
     parser.add_argument("--output-format", "-f", default="txt", choices=["txt", "json"],
                         help="输出格式")
     parser.add_argument("--hub", default="modelscope", choices=["modelscope", "hf"],
                         help="模型来源：modelscope 或 hf（HuggingFace）")
     parser.add_argument("--device", "-d", default="cpu", help="推理设备：cpu / cuda:0 / mps")
     parser.add_argument("--batch-size", "-bs", type=int, default=1, help="推理 batch size")
+    parser.add_argument("--separate-channel", "-sc", action="store_true", default=False,
+                        help="分离声道分别转录，每声道独立输出")
     parser.add_argument("--hotwords", default=None, help="热词字符串，空格分隔")
     parser.add_argument("--disable-update", action="store_true", help="禁用 FunASR 版本检查")
     return parser.parse_args()
@@ -134,17 +138,18 @@ def transcribe_file(model, audio_path: str, args) -> dict:
     }
 
 
-def save_result(result: dict, audio_path: Path, output_dir: Path | None, fmt: str):
-    """将结果写入文件。"""
+def save_result(result: dict, audio_path: Path, output_dir: Path, fmt: str, channel: int | None = None):
+    """将结果写入文件。channel 不为 None 时在文件名中附加声道后缀。"""
     base = audio_path.stem
-    out_dir = output_dir if output_dir else audio_path.parent
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if channel is not None:
+        base = f"{base}_channel{channel}"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     if fmt == "json":
-        out_path = out_dir / f"{base}.funasr.json"
+        out_path = output_dir / f"{base}.funasr.json"
         out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
-        out_path = out_dir / f"{base}.funasr.txt"
+        out_path = output_dir / f"{base}.funasr.txt"
         out_path.write_text(result["text"], encoding="utf-8")
 
     logger.info("[output] 已保存: %s", out_path)
@@ -168,6 +173,7 @@ def main() -> None:
 
     logger.info("[config] model=%s  vad=%s  punc=%s", args.model, args.vad_model, args.punc_model)
     logger.info("[config] hub=%s  device=%s  batch_size=%d", args.hub, args.device, args.batch_size)
+    logger.info("[config] separate_channel=%s", args.separate_channel)
     logger.info("[input]  %s", args.input)
 
     t0 = time.perf_counter()
@@ -178,19 +184,45 @@ def main() -> None:
     files = collect_files(args.input)
     logger.info("[info]   共 %d 个音频文件待处理", len(files))
 
-    output_dir = Path(args.output) if args.output else None
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     total_audio_s = 0.0
     total_transcribe_s = 0.0
 
     for i, f in enumerate(files, 1):
         logger.info("\n[%d/%d] 处理: %s", i, len(files), f.name)
-        result = transcribe_file(model, str(f), args)
-        logger.info("[result] %s", result["text"])
 
-        save_result(result, f, output_dir, args.output_format)
+        if args.separate_channel:
+            import soundfile as sf
+            audio_data, sample_rate = sf.read(str(f), always_2d=True)
+            num_channels = audio_data.shape[1]
+            logger.info("[channel] 检测到 %d 声道，分别转写", num_channels)
 
-        total_audio_s += result["audio_dur_s"]
-        total_transcribe_s += result["transcribe_s"]
+            with tempfile.TemporaryDirectory() as tmpdir:
+                for ch in range(num_channels):
+                    channel_audio = audio_data[:, ch]
+                    tmp_wav = os.path.join(tmpdir, f"ch{ch}.wav")
+                    sf.write(tmp_wav, channel_audio, sample_rate)
+
+                    logger.info("[channel %d] 开始转写...", ch)
+                    result = transcribe_file(model, tmp_wav, args)
+                    result["source"] = str(f)
+                    result["filename"] = f.name
+                    result["channel"] = ch
+                    logger.info("[channel %d] %s", ch, result["text"])
+
+                    save_result(result, f, output_dir, args.output_format, channel=ch)
+
+                    total_audio_s += result["audio_dur_s"]
+                    total_transcribe_s += result["transcribe_s"]
+        else:
+            result = transcribe_file(model, str(f), args)
+            logger.info("[result] %s", result["text"])
+            save_result(result, f, output_dir, args.output_format)
+
+            total_audio_s += result["audio_dur_s"]
+            total_transcribe_s += result["transcribe_s"]
 
     # 汇总统计
     logger.info("\n[summary] 处理文件数: %d", len(files))
