@@ -69,6 +69,8 @@ def parse_args() -> argparse.Namespace:
                         help="合并短 VAD 分段（SenseVoice）")
     parser.add_argument("--merge-length-s", type=float, default=15.0,
                         help="合并 VAD 分段的最大时长，秒（SenseVoice，需配合 --merge-vad）")
+    parser.add_argument("--timestamp", action="store_true", default=False,
+                        help="在输出 JSON 中包含每个识别结果的开始/结束时间（秒）")
     return parser.parse_args()
 
 
@@ -122,8 +124,33 @@ def load_model(args) -> "AutoModel":
     return AutoModel(**kwargs)
 
 
+def _clean_text(text: str) -> str:
+    """清除 SenseVoice 原始标签，返回干净文本。"""
+    if text and re.search(r"<\|(?:zh|en|yue|ja|ko|nospeech)\|>", text):
+        try:
+            from funasr.utils.postprocess_utils import rich_transcription_postprocess
+            return rich_transcription_postprocess(text)
+        except ImportError:
+            return re.sub(r"<\|[^|]+\|>", "", text).strip()
+    return text
+
+
+def _norm_ts_ms(ts_entry) -> tuple[float, float] | None:
+    """
+    将单条时间戳转为 (start_s, end_s)。
+    - paraformer timestamp item: [start_ms, end_ms]
+    - Fun-ASR-Nano timestamps item: {"start_time": s, "end_time": s}
+    返回 None 表示无有效时间戳。
+    """
+    if isinstance(ts_entry, dict):
+        return ts_entry.get("start_time"), ts_entry.get("end_time")
+    if isinstance(ts_entry, (list, tuple)) and len(ts_entry) >= 2:
+        return ts_entry[0] / 1000.0, ts_entry[1] / 1000.0
+    return None
+
+
 def transcribe_file(model, audio_path: str, args) -> dict:
-    """转写单个文件，返回结果 dict。"""
+    """转写单个文件，返回结果 dict。text 字段为列表，元素为字符串或含时间戳的 dict。"""
     audio_dur_s = _audio_duration(audio_path)
 
     generate_kwargs = {}
@@ -145,21 +172,35 @@ def transcribe_file(model, audio_path: str, args) -> dict:
         audio_dur_s=audio_dur_s,
     )
 
-    text = ""
+    text_list = []
     if results and isinstance(results, list):
-        text = results[0].get("text", "")
-        # SenseVoice 输出含原始标签，需后处理清除
-        if text and re.search(r"<\|(?:zh|en|yue|ja|ko|nospeech)\|>", text):
-            try:
-                from funasr.utils.postprocess_utils import rich_transcription_postprocess
-                text = rich_transcription_postprocess(text)
-            except ImportError:
-                text = re.sub(r"<\|[^|]+\|>", "", text).strip()
+        for item in results:
+            raw = item.get("text", "").strip()
+            if not raw:
+                continue
+            cleaned = _clean_text(raw)
+            if not cleaned:
+                continue
+
+            if not args.timestamp:
+                text_list.append(cleaned)
+            else:
+                # 取首尾时间戳代表本 VAD 段的 start / end
+                ts_list = item.get("timestamp") or item.get("timestamps") or []
+                start_s, end_s = None, None
+                if ts_list:
+                    first = _norm_ts_ms(ts_list[0])
+                    last = _norm_ts_ms(ts_list[-1])
+                    if first:
+                        start_s = round(first[0], 3)
+                    if last:
+                        end_s = round(last[1], 3)
+                text_list.append({"text": cleaned, "start": start_s, "end": end_s})
 
     return {
         "source": audio_path,
         "filename": os.path.basename(audio_path),
-        "text": text,
+        "text": text_list,
         "audio_dur_s": round(audio_dur_s, 3),
         "transcribe_s": round(elapsed, 3),
         "rtf": round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None,
@@ -178,7 +219,12 @@ def save_result(result: dict, audio_path: Path, output_dir: Path, fmt: str, chan
         out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         out_path = output_dir / f"{base}.funasr.txt"
-        out_path.write_text(result["text"], encoding="utf-8")
+        items = result["text"]
+        # text 字段为列表；txt 格式按行输出纯文本
+        lines = []
+        for item in items:
+            lines.append(item["text"] if isinstance(item, dict) else item)
+        out_path.write_text("\n".join(lines), encoding="utf-8")
 
     logger.info("[output] 已保存: %s", out_path)
     return out_path
@@ -239,7 +285,7 @@ def main() -> None:
                     result["source"] = str(f)
                     result["filename"] = f.name
                     result["channel"] = ch
-                    logger.info("[channel %d] %s", ch, result["text"])
+                    logger.info("[channel %d] %d 条结果", ch, len(result["text"]))
 
                     save_result(result, f, output_dir, args.output_format, channel=ch)
 
@@ -247,7 +293,7 @@ def main() -> None:
                     total_transcribe_s += result["transcribe_s"]
         else:
             result = transcribe_file(model, str(f), args)
-            logger.info("[result] %s", result["text"])
+            logger.info("[result] %d 条结果", len(result["text"]))
             save_result(result, f, output_dir, args.output_format)
 
             total_audio_s += result["audio_dur_s"]

@@ -56,6 +56,7 @@ python scripts/transcribe.py -i <音频文件或目录> [OPTIONS]
 | `--use-itn` | | `False` | 启用标点与数字规范化 ITN（SenseVoice） |
 | `--merge-vad` | | `False` | 合并短 VAD 分段（SenseVoice） |
 | `--merge-length-s` | | `15.0` | 合并 VAD 分段的最大时长，秒（需配合 `--merge-vad`） |
+| `--timestamp` | | `False` | 在 JSON 中包含每条识别结果的开始/结束时间（秒） |
 
 ### 示例
 
@@ -86,14 +87,32 @@ python scripts/transcribe.py -i audio.wav \
 
 ### 输出格式
 
-**txt**：纯文本，每个文件对应一个 `<stem>.funasr.txt`。
+**txt**：纯文本，每条识别结果占一行，对应 `<stem>.funasr.txt`。
 
-**json**：
+**json**（默认，`--timestamp` 未启用）：
 ```json
 {
   "source": "/path/to/audio.wav",
   "filename": "audio.wav",
-  "text": "识别结果",
+  "text": [
+    "第一段识别结果",
+    "第二段识别结果"
+  ],
+  "audio_dur_s": 12.345,
+  "transcribe_s": 1.234,
+  "rtf": 0.1
+}
+```
+
+**json**（`--timestamp` 启用）：
+```json
+{
+  "source": "/path/to/audio.wav",
+  "filename": "audio.wav",
+  "text": [
+    {"text": "第一段识别结果", "start": 0.0, "end": 5.0},
+    {"text": "第二段识别结果", "start": 5.2, "end": 10.1}
+  ],
   "audio_dur_s": 12.345,
   "transcribe_s": 1.234,
   "rtf": 0.1
