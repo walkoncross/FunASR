@@ -17,6 +17,7 @@ Usage:
   --device/-d         推理设备: cpu / cuda:0 / mps (default: cpu)
   --batch-size/-bs    推理 batch size (default: 1)
   --channels/-c       处理声道数 (default: 2)
+  --silence-gap/-sg   句间静音间隔阈值(s)，超过则切断为新话语 (default: 0.5)
   --hotwords          热词字符串，空格分隔
   --enable-update     启用 FunASR 版本检查（默认禁用）
 
@@ -68,6 +69,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", "-d", default="cpu", help="推理设备：cpu / cuda:0 / mps")
     parser.add_argument("--batch-size", "-bs", type=int, default=1, help="推理 batch size")
     parser.add_argument("--channels", "-c", type=int, default=2, help="处理声道数")
+    parser.add_argument("--silence-gap", "-sg", type=float, default=0.5, dest="silence_gap",
+                        help="句间静音间隔阈值(s)，token 间隔超过此值则切断为新话语")
     parser.add_argument("--hotwords", default=None, help="热词字符串，空格分隔")
     parser.add_argument("--enable-update", action="store_true", default=False,
                         help="启用 FunASR 版本检查（默认禁用）")
@@ -96,13 +99,57 @@ def load_model(args):
     return AutoModel(**kwargs)
 
 
+def _split_utterances_by_gap(text: str, timestamps: list, silence_gap_s: float) -> list[dict]:
+    """
+    将字符级 timestamp [[start_ms, end_ms], ...] 按静音间隔切分成多条话语。
+    text 中每个字符对应 timestamps 中一个元素（FunASR paraformer 输出保证对齐）。
+    """
+    if not timestamps:
+        return [{"text": text, "start": 0.0, "end": 0.0}] if text else []
+
+    silence_gap_ms = silence_gap_s * 1000.0
+    utterances = []
+    seg_chars: list[str] = []
+    seg_start_ms: float = timestamps[0][0]
+    prev_end_ms: float = timestamps[0][1]
+
+    chars = list(text)  # 字符列表，与 timestamps 对齐
+    # 若字符数与 timestamp 数不匹配，按最短截断
+    n = min(len(chars), len(timestamps))
+
+    for i in range(n):
+        start_ms, end_ms = timestamps[i]
+        gap = start_ms - prev_end_ms
+
+        if seg_chars and gap >= silence_gap_ms:
+            # 切断：保存当前句
+            utterances.append({
+                "text": "".join(seg_chars).strip(),
+                "start": round(seg_start_ms / 1000.0, 3),
+                "end": round(prev_end_ms / 1000.0, 3),
+            })
+            seg_chars = []
+            seg_start_ms = start_ms
+
+        seg_chars.append(chars[i])
+        prev_end_ms = end_ms
+
+    # 最后一段
+    if seg_chars:
+        utterances.append({
+            "text": "".join(seg_chars).strip(),
+            "start": round(seg_start_ms / 1000.0, 3),
+            "end": round(prev_end_ms / 1000.0, 3),
+        })
+
+    return [u for u in utterances if u["text"]]
+
+
 def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     """
     转写单声道 wav，返回话语列表。
-    FunASR + fsmn-vad 会在结果中携带 timestamp 字段（句级时间戳）。
-    每条结果格式示例：
-      {"text": "你好", "timestamp": [[0, 500], [500, 1200]], ...}
-    timestamp 单位为毫秒。
+    FunASR paraformer + fsmn-vad 返回 1 条结果，timestamp 为字符级 [[start_ms, end_ms], ...]。
+    用 --silence-gap 阈值将字符级时间戳重新切分为多条话语。
     """
     generate_kwargs = {}
     if args.hotwords:
@@ -116,20 +163,11 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
 
     for item in results:
         text = item.get("text", "").strip()
+        ts = item.get("timestamp")
         if not text:
             continue
-
-        # fsmn-vad 输出的 timestamp 是 [[start_ms, end_ms], ...] 字符级/词级时间戳
-        # 取整段的首尾作为话语时间
-        ts = item.get("timestamp")
-        if ts and len(ts) > 0:
-            start_s = ts[0][0] / 1000.0
-            end_s = ts[-1][1] / 1000.0
-        else:
-            start_s = 0.0
-            end_s = 0.0
-
-        utterances.append({"text": text, "start": start_s, "end": end_s})
+        segs = _split_utterances_by_gap(text, ts or [], args.silence_gap)
+        utterances.extend(segs)
 
     return utterances
 
@@ -155,6 +193,7 @@ def main() -> None:
 
     logger.info("[config] model=%s  vad=%s  punc=%s", args.model, args.vad_model, args.punc_model)
     logger.info("[config] hub=%s  device=%s  batch_size=%d", args.hub, args.device, args.batch_size)
+    logger.info("[config] silence_gap=%.2fs  channels=%d", args.silence_gap, args.channels)
     logger.info("[input]  %s  (%d ch, %.1fs)", args.input, num_channels, total_dur_s)
 
     t0 = time.perf_counter()
