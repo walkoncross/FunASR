@@ -16,7 +16,7 @@ Usage:
   --batch-size/-bs    推理 batch size (default: 1)
   --separate-channel/-sc  分离声道分别转录
   --hotwords          热词字符串，空格分隔
-  --disable-update    禁用 FunASR 版本检查
+  --enable-update     启用 FunASR 版本检查（默认禁用）
 """
 
 import argparse
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--punc-model", "-pm", default="ct-punc", help="标点模型名称或路径")
     parser.add_argument("--input", "-i", required=True, help="音频文件或目录")
     parser.add_argument("--output", "-o", default="./results/", help="输出目录")
-    parser.add_argument("--output-format", "-f", default="txt", choices=["txt", "json"],
+    parser.add_argument("--output-format", "-f", default="json", choices=["txt", "json"],
                         help="输出格式")
     parser.add_argument("--hub", default="modelscope", choices=["modelscope", "hf"],
                         help="模型来源：modelscope 或 hf（HuggingFace）")
@@ -57,7 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--separate-channel", "-sc", action="store_true", default=False,
                         help="分离声道分别转录，每声道独立输出")
     parser.add_argument("--hotwords", default=None, help="热词字符串，空格分隔")
-    parser.add_argument("--disable-update", action="store_true", help="禁用 FunASR 版本检查")
+    parser.add_argument("--enable-update", action="store_true", default=False,
+                        help="启用 FunASR 版本检查（默认禁用）")
     return parser.parse_args()
 
 
@@ -92,7 +93,7 @@ def load_model(args) -> "AutoModel":
         punc_model=args.punc_model,
         device=args.device,
         batch_size=args.batch_size,
-        disable_update=args.disable_update,
+        disable_update=not args.enable_update,
     )
 
     if args.hub == "hf":

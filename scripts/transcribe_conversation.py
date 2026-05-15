@@ -18,7 +18,7 @@ Usage:
   --batch-size/-bs    推理 batch size (default: 1)
   --channels/-c       处理声道数 (default: 2)
   --hotwords          热词字符串，空格分隔
-  --disable-update    禁用 FunASR 版本检查
+  --enable-update     启用 FunASR 版本检查（默认禁用）
 
 Output format:
   {
@@ -69,7 +69,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", "-bs", type=int, default=1, help="推理 batch size")
     parser.add_argument("--channels", "-c", type=int, default=2, help="处理声道数")
     parser.add_argument("--hotwords", default=None, help="热词字符串，空格分隔")
-    parser.add_argument("--disable-update", action="store_true", help="禁用 FunASR 版本检查")
+    parser.add_argument("--enable-update", action="store_true", default=False,
+                        help="启用 FunASR 版本检查（默认禁用）")
     return parser.parse_args()
 
 
@@ -82,7 +83,7 @@ def load_model(args):
         punc_model=args.punc_model,
         device=args.device,
         batch_size=args.batch_size,
-        disable_update=args.disable_update,
+        disable_update=not args.enable_update,
     )
     if args.hub == "hf":
         kwargs["hub"] = "hf"
