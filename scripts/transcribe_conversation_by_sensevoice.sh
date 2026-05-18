@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SenseVoiceSmall：双声道对话转写，多语言 + 情感识别
-# 注意：--merge-vad 会合并短分段，可能降低对话切分粒度，按需开启
-# 用法：./transcribe_conversation_by_sensevoice.sh <立体声音频>
+# SenseVoiceSmall: two-channel conversation transcription, multilingual + emotion recognition
+# Note: --merge-vad merges short segments and may reduce splitting granularity; enable as needed
+# Usage: ./transcribe_conversation_by_sensevoice.sh <stereo_audio>
 input=$1
 
 python transcribe_conversation.py \

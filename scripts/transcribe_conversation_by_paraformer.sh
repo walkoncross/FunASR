@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# paraformer-zh：双声道对话转写，字符级时间戳，多轮切分精度最高
-# 用法：./transcribe_conversation_by_paraformer.sh <立体声音频>
+# paraformer-zh: two-channel conversation transcription, character-level timestamps, highest multi-turn splitting accuracy
+# Usage: ./transcribe_conversation_by_paraformer.sh <stereo_audio>
 input=$1
 
 python transcribe_conversation.py \

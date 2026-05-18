@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fun-ASR-Nano-2512：双声道对话转写，端到端 LLM-ASR，fsmn-vad 分段
-# 用法：./transcribe_conversation_by_nano.sh <立体声音频>
+# Fun-ASR-Nano-2512: two-channel conversation transcription, end-to-end LLM-ASR, fsmn-vad segmentation
+# Usage: ./transcribe_conversation_by_nano.sh <stereo_audio>
 input=$1
 
 python transcribe_conversation.py \

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# paraformer-zh：带 VAD，适合长音频，字符级时间戳，punc 模型加标点
-# 用法：./transcribe_by_paraformer.sh <音频文件或目录>
+# paraformer-zh: with VAD, suitable for long audio, character-level timestamps, punc model adds punctuation
+# Usage: ./transcribe_by_paraformer.sh <audio_file_or_dir>
 input=$1
 
 python transcribe.py \
@@ -11,4 +11,3 @@ python transcribe.py \
   --punc-model ct-punc \
   --silence-gap 0.5 \
   --separate-channel
-

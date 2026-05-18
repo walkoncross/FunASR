@@ -1,25 +1,25 @@
 # coding=utf-8
 """
-FunASR 双声道对话转写脚本（ModelScope / HuggingFace 后端）
+FunASR two-channel conversation transcription script (ModelScope / HuggingFace backend)
 
-对立体声音频逐声道处理，利用 FunASR 内置 fsmn-vad 完成分段，
-将各声道的话语按时间排序，输出对话 JSON。
+Processes each channel of a stereo audio file using FunASR with fsmn-vad segmentation,
+sorts utterances from both channels by timestamp, and outputs a conversation JSON.
 
 Usage:
   python scripts/transcribe_conversation.py -i <stereo_audio> [OPTIONS]
 
-  --model/-m          ASR 模型名称或本地路径 (default: paraformer-zh)
-  --vad-model/-vm     VAD 模型名称或路径 (default: fsmn-vad)
-  --punc-model/-pm    标点模型名称或路径 (default: ct-punc)
-  --input/-i          立体声音频文件（必填）
-  --output/-o         JSON 输出路径 (default: results/<basename>-conversation.json)
-  --hub               模型来源: modelscope / hf (default: modelscope)
-  --device/-d         推理设备: cpu / cuda:0 / mps (default: cpu)
-  --batch-size/-bs    推理 batch size (default: 1)
-  --channels/-c       处理声道数 (default: 2)
-  --silence-gap/-sg   句间静音间隔阈值(s)，超过则切断为新话语 (default: 0.5)
-  --hotwords          热词字符串，空格分隔
-  --enable-update     启用 FunASR 版本检查（默认禁用）
+  --model/-m          ASR model name or local path (default: paraformer-zh)
+  --vad-model/-vm     VAD model name or path (default: fsmn-vad)
+  --punc-model/-pm    Punctuation model name or path (default: ct-punc)
+  --input/-i          Stereo audio file (required)
+  --output/-o         JSON output path (default: results/<basename>-conversation.json)
+  --hub               Model source: modelscope / hf (default: modelscope)
+  --device/-d         Inference device: cpu / cuda:0 / mps (default: cpu)
+  --batch-size/-bs    Inference batch size (default: 1)
+  --channels/-c       Number of channels to process (default: 2)
+  --silence-gap/-sg   Silence gap threshold in seconds for splitting utterances (default: 0.5)
+  --hotwords          Hotwords string, space-separated
+  --enable-update     Enable FunASR version check (disabled by default)
 
 Output format:
   {
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 
 def _model_tag(model_name: str, vad_model: str, punc_model: str) -> str:
-    """生成文件名标签，同 transcribe.py。"""
+    """Generate filename tag, same logic as transcribe.py."""
     name = Path(model_name).name or model_name
     name = name.replace("/", "-")
     vad_tag = Path(vad_model).name if vad_model else "no-vad"
@@ -65,34 +65,34 @@ def _model_tag(model_name: str, vad_model: str, punc_model: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="FunASR 双声道对话转写工具",
+        description="FunASR two-channel conversation transcription tool",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--model", "-m", default="paraformer-zh", help="ASR 模型名称或本地路径")
-    parser.add_argument("--vad-model", "-vm", default="fsmn-vad", help="VAD 模型名称或路径")
-    parser.add_argument("--punc-model", "-pm", default="ct-punc", help="标点模型名称或路径")
-    parser.add_argument("--input", "-i", required=True, help="立体声音频文件路径")
+    parser.add_argument("--model", "-m", default="paraformer-zh", help="ASR model name or local path")
+    parser.add_argument("--vad-model", "-vm", default="fsmn-vad", help="VAD model name or path")
+    parser.add_argument("--punc-model", "-pm", default="ct-punc", help="Punctuation model name or path")
+    parser.add_argument("--input", "-i", required=True, help="Stereo audio file path")
     parser.add_argument("--output", "-o", default=None,
-                        help="JSON 输出路径（默认: results/<basename>-conversation.json）")
+                        help="JSON output path (default: results/<basename>-conversation.json)")
     parser.add_argument("--hub", default="modelscope", choices=["modelscope", "hf"],
-                        help="模型来源：modelscope 或 hf（HuggingFace）")
-    parser.add_argument("--device", "-d", default="cpu", help="推理设备：cpu / cuda:0 / mps")
-    parser.add_argument("--batch-size", "-bs", type=int, default=1, help="推理 batch size")
-    parser.add_argument("--channels", "-c", type=int, default=2, help="处理声道数")
+                        help="Model source: modelscope or hf (HuggingFace)")
+    parser.add_argument("--device", "-d", default="cpu", help="Inference device: cpu / cuda:0 / mps")
+    parser.add_argument("--batch-size", "-bs", type=int, default=1, help="Inference batch size")
+    parser.add_argument("--channels", "-c", type=int, default=2, help="Number of channels to process")
     parser.add_argument("--silence-gap", "-sg", type=float, default=0.5, dest="silence_gap",
-                        help="句间静音间隔阈值(s)，token 间隔超过此值则切断为新话语")
-    parser.add_argument("--hotwords", default=None, help="热词字符串，空格分隔")
+                        help="Silence gap threshold in seconds; token gaps above this split utterances")
+    parser.add_argument("--hotwords", default=None, help="Hotwords string, space-separated")
     parser.add_argument("--enable-update", action="store_true", default=False,
-                        help="启用 FunASR 版本检查（默认禁用）")
-    # SenseVoice 专用参数
+                        help="Enable FunASR version check (disabled by default)")
+    # SenseVoice-specific arguments
     parser.add_argument("--language", default=None,
-                        help="语言代码（SenseVoice）：auto / zh / en / yue / ja / ko / nospeech")
+                        help="Language code (SenseVoice): auto / zh / en / yue / ja / ko / nospeech")
     parser.add_argument("--use-itn", action="store_true", default=False,
-                        help="启用标点与数字规范化 ITN（SenseVoice）")
+                        help="Enable inverse text normalization ITN (SenseVoice)")
     parser.add_argument("--merge-vad", action="store_true", default=False,
-                        help="合并短 VAD 分段（SenseVoice，注意会减少切分粒度）")
+                        help="Merge short VAD segments (SenseVoice; reduces splitting granularity)")
     parser.add_argument("--merge-length-s", type=float, default=15.0,
-                        help="合并 VAD 分段的最大时长，秒（SenseVoice，需配合 --merge-vad）")
+                        help="Max duration in seconds to merge VAD segments (SenseVoice, requires --merge-vad)")
     return parser.parse_args()
 
 
@@ -105,20 +105,20 @@ def load_model(args):
         batch_size=args.batch_size,
         disable_update=not args.enable_update,
     )
-    # 空字符串视为不传，避免 AutoModel 尝试构建空模型名导致报错
+    # Empty string means omit the argument to avoid AutoModel building an empty model name
     if args.vad_model:
         kwargs["vad_model"] = args.vad_model
         if args.vad_model == "fsmn-vad":
-            logger.info("使用内置 fsmn-vad 模型")
+            logger.info("Using built-in fsmn-vad model")
             kwargs["vad_kwargs"] = {"max_single_segment_time": 30000}
     if args.punc_model:
         kwargs["punc_model"] = args.punc_model
 
     if args.hub == "hf":
         kwargs["hub"] = "hf"
-        logger.info("使用 HuggingFace Hub 加载模型")
+        logger.info("Loading model from HuggingFace Hub")
     else:
-        logger.info("使用 ModelScope 加载模型")
+        logger.info("Loading model from ModelScope")
     if args.hotwords:
         kwargs["hotword"] = args.hotwords
 
@@ -127,29 +127,29 @@ def load_model(args):
 
 def _norm_timestamps(timestamps: list) -> list[tuple[float, float]]:
     """
-    统一时间戳格式为 (start_ms, end_ms) 的列表。
-    支持两种输入格式：
-      - paraformer:     [[start_ms, end_ms], ...]          单位 ms
-      - Fun-ASR-Nano:   [{"start_time": s, "end_time": e}, ...]  单位 s（经 vad 偏移后）
+    Normalize timestamps to a list of (start_ms, end_ms) tuples.
+    Supports two input formats:
+      - paraformer:   [[start_ms, end_ms], ...]                   (ms)
+      - Fun-ASR-Nano: [{"start_time": s, "end_time": e}, ...]    (seconds, after VAD offset)
     """
     if not timestamps:
         return []
     first = timestamps[0]
     if isinstance(first, dict):
-        # Fun-ASR-Nano timestamps：单位秒，转为 ms
+        # Fun-ASR-Nano timestamps: seconds -> convert to ms
         return [(t["start_time"] * 1000, t["end_time"] * 1000) for t in timestamps]
     else:
-        # paraformer timestamp：已是 ms
+        # paraformer timestamps: already in ms
         return [(t[0], t[1]) for t in timestamps]
 
 
 def _split_utterances_by_gap(text: str, timestamps: list, silence_gap_s: float) -> list[dict]:
     """
-    将 token 级时间戳按静音间隔切分成多条话语。
-    支持三种情形（同 transcribe.py _split_by_gap）：
-      A) paraformer 无 punc：len(text) == len(timestamps)，字符与 ts 一一对齐
-      B) paraformer + punc ：len(text) > len(timestamps)，跳过标点字符对齐
-      C) Fun-ASR-Nano      ：timestamps 为字典列表，按时间边界切段
+    Split token-level timestamps into multiple utterances by silence gaps.
+    Handles three cases (same as transcribe.py _split_by_gap):
+      A) paraformer without punc: len(text) == len(timestamps), 1:1 char-ts alignment
+      B) paraformer + punc:       len(text) > len(timestamps), skip punctuation chars
+      C) Fun-ASR-Nano:            timestamps are dicts, split by time boundaries
     """
     if not timestamps:
         return [{"text": text, "start": 0.0, "end": 0.0}] if text else []
@@ -157,7 +157,7 @@ def _split_utterances_by_gap(text: str, timestamps: list, silence_gap_s: float) 
     norm_ts = _norm_timestamps(timestamps)
     silence_gap_ms = silence_gap_s * 1000.0
 
-    # C) Fun-ASR-Nano：timestamps 是字典列表
+    # Case C: Fun-ASR-Nano dict timestamps
     is_nano = isinstance(timestamps[0], dict)
     if is_nano:
         seg_ranges: list[tuple[float, float]] = []
@@ -185,8 +185,8 @@ def _split_utterances_by_gap(text: str, timestamps: list, silence_gap_s: float) 
                                     "end": round(e_ms / 1000.0, 3)})
         return [u for u in utterances if u["text"]]
 
-    # A/B) paraformer：punc 插入标点后 len(text) >= len(norm_ts)
-    # 跳过标点字符（不消耗 ts），非标点字符与 ts 一一对齐
+    # Cases A/B: paraformer; len(text) >= len(norm_ts) when punc model is used.
+    # Skip punctuation chars (no ts consumed); align CJK/alnum chars 1:1 with ts.
     ts_idx = 0
     n_ts = len(norm_ts)
     utterances = []
@@ -230,26 +230,23 @@ _SENSEVOICE_LANG_RE = re.compile(r"<\|(?:zh|en|yue|ja|ko|nospeech)\|>")
 
 
 def _is_sensevoice_output(text: str) -> bool:
-    """检测文本是否包含 SenseVoice 原始标签。"""
+    """Return True if the text contains SenseVoice raw language tags."""
     return bool(_SENSEVOICE_LANG_RE.search(text))
 
 
 def _split_sensevoice_raw(raw_text: str) -> list[str]:
     """
-    将 SenseVoice 原始输出按 VAD 分段切开（各段由语言标签开头，段间以空格连接）。
-    inference_with_vad 将各 VAD 段文本以 ' ' 拼接（auto_model.py L591）。
-    SenseVoice 每段文本均以 <|lang|> 开头，因此以 ' <|lang_tag|>' 为分隔符切开。
-    返回各段经 rich_transcription_postprocess 处理后的干净文本列表。
+    Split SenseVoice raw output into individual VAD-segment clean texts.
+    inference_with_vad concatenates VAD segments with ' ' (auto_model.py L591).
+    Each SenseVoice segment starts with <|lang|>, so split on ' <|lang_tag|>' boundaries.
+    Returns a list of postprocessed non-empty strings.
     """
     try:
         from funasr.utils.postprocess_utils import rich_transcription_postprocess
     except ImportError:
-        # 无法导入时直接去除 <|...|> 标签
         def rich_transcription_postprocess(s):
             return re.sub(r"<\|[^|]+\|>", "", s).strip()
 
-    # inference_with_vad 将各 VAD 段文本以 ' ' 拼接，每段以语言标签开头，
-    # 因此以 ' <|lang_tag|>' 为分界点切开（使用前瞻断言保留各段首部的语言标签）
     segments_raw = re.split(r"(?= <\|(?:zh|en|yue|ja|ko|nospeech)\|>)", raw_text)
     result = []
     for seg in segments_raw:
@@ -261,15 +258,15 @@ def _split_sensevoice_raw(raw_text: str) -> list[str]:
 
 def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     """
-    转写单声道 wav，返回话语列表。
-    支持三种模型输出：
-      - paraformer: item["timestamp"] = [[start_ms, end_ms], ...]  字符级
-      - Fun-ASR-Nano: item["timestamps"] = [{"start_time":s, "end_time":e}, ...]  token 级（秒）
-      - SenseVoice: 无时间戳，文本含 <|lang|><|emo|><|event|><|itn|> 标签
-    用 --silence-gap 阈值按静音间隔切分为多条话语（SenseVoice 按 VAD 段边界切分）。
+    Transcribe a mono wav file. Returns a list of utterance dicts.
+    Supports three model output formats:
+      - paraformer:   item["timestamp"] = [[start_ms, end_ms], ...]  (char-level)
+      - Fun-ASR-Nano: item["timestamps"] = [{"start_time": s, "end_time": e}, ...]  (token-level, seconds)
+      - SenseVoice:   no timestamps; text contains <|lang|><|emo|><|event|><|itn|> tags
+    Utterances are split by --silence-gap; SenseVoice splits at VAD segment boundaries.
     """
     generate_kwargs = {
-        # paraformer: 启用字符级时间戳（其他模型忽略此参数）
+        # paraformer: enable character-level timestamps (other models ignore this)
         "pred_timestamp": True,
     }
     if args.hotwords:
@@ -281,10 +278,7 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     if args.merge_vad:
         generate_kwargs["merge_vad"] = True
         generate_kwargs["merge_length_s"] = args.merge_length_s
-    # 强制每个 VAD segment 单独推理：
-    # - batch_size_threshold_s=0：禁止多 segment 合并成 batch
-    # - batch_size_s=0：使 inference_with_vad 内部 batch_size=1（毫秒粒度→样本数=1）
-    # 避免 Fun-ASR-Nano 等不支持 batch decoding 的模型报错
+    # Force per-segment inference to avoid "batch decoding not implemented" with Fun-ASR-Nano
     if args.vad_model:
         generate_kwargs["batch_size_threshold_s"] = 0
         generate_kwargs["batch_size_s"] = 0
@@ -300,7 +294,7 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
         if not text:
             continue
 
-        # SenseVoice 输出含原始标签，无时间戳：按 VAD 分段边界切分
+        # SenseVoice output contains raw tags and no timestamps: split at VAD boundaries
         if _is_sensevoice_output(text):
             seg_texts = _split_sensevoice_raw(text)
             for seg_text in seg_texts:
@@ -308,7 +302,7 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
                     utterances.append({"text": seg_text, "start": 0.0, "end": 0.0})
             continue
 
-        # paraformer: "timestamp"（字符级 ms 列表）；Fun-ASR-Nano: "timestamps"（token 级秒字典）
+        # paraformer: "timestamp" (char-level ms list); Fun-ASR-Nano: "timestamps" (token-level seconds dict)
         ts = item.get("timestamp") or item.get("timestamps") or []
         segs = _split_utterances_by_gap(text, ts, args.silence_gap)
         utterances.extend(segs)
@@ -320,7 +314,7 @@ def main() -> None:
     args = parse_args()
 
     if not os.path.isfile(args.input):
-        logger.error("--input 必须是文件: %r", args.input)
+        logger.error("--input must be a file: %r", args.input)
         sys.exit(1)
 
     audio_data, sample_rate = sf.read(args.input, always_2d=True)
@@ -329,7 +323,7 @@ def main() -> None:
     channels_to_process = min(args.channels, num_channels)
 
     if num_channels < args.channels:
-        logger.warning("音频仅有 %d 声道，实际处理 %d 声道", num_channels, channels_to_process)
+        logger.warning("audio has only %d channel(s), processing %d", num_channels, channels_to_process)
 
     basename = os.path.splitext(os.path.basename(args.input))[0]
     if args.output:
@@ -347,7 +341,7 @@ def main() -> None:
 
     t0 = time.perf_counter()
     model = load_model(args)
-    logger.info("[timing] 模型加载: %.3fs", time.perf_counter() - t0)
+    logger.info("[timing] model loaded: %.3fs", time.perf_counter() - t0)
 
     all_utterances = []
     total_transcribe_s = 0.0
@@ -358,7 +352,7 @@ def main() -> None:
             tmp_wav = os.path.join(tmpdir, f"ch{ch}.wav")
             sf.write(tmp_wav, channel_audio, sample_rate)
 
-            logger.info("\n[channel %d] 开始转写...", ch)
+            logger.info("\n[channel %d] transcribing...", ch)
             t1 = time.perf_counter()
             utterances = transcribe_channel(model, tmp_wav, args)
             elapsed = time.perf_counter() - t1
@@ -367,7 +361,7 @@ def main() -> None:
             ch_dur = len(channel_audio) / sample_rate
             rtf = elapsed / ch_dur if ch_dur > 0 else 0.0
             rtfx = 1 / rtf if rtf > 0 else 0.0
-            logger.info("[channel %d] %d 段话语  耗时=%.3fs  RTF=%.4f  RTFx=%.2f",
+            logger.info("[channel %d] %d utterance(s)  elapsed=%.3fs  RTF=%.4f  RTFx=%.2f",
                         ch, len(utterances), elapsed, rtf, rtfx)
 
             for u in utterances:
@@ -379,7 +373,7 @@ def main() -> None:
                     "end": u["end"],
                 })
 
-    # 按开始时间排序，同时刻按声道顺序
+    # Sort by start time; break ties by channel order
     all_utterances.sort(key=lambda u: (u["start"], u["role"]))
 
     rtf = round(total_transcribe_s / total_dur_s, 4) if total_dur_s > 0 else None
@@ -400,12 +394,12 @@ def main() -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 
-    logger.info("\n[result] 共 %d 条话语", len(all_utterances))
+    logger.info("\n[result] %d utterance(s) total", len(all_utterances))
     for u in all_utterances[:8]:
         logger.info("  [%.2f-%.2f] %s: %r", u["start"], u["end"], u["role"], u["text"])
     if len(all_utterances) > 8:
-        logger.info("  ... (%d 条更多)", len(all_utterances) - 8)
-    logger.info("[output] JSON 已写入: %s", output_path)
+        logger.info("  ... (%d more)", len(all_utterances) - 8)
+    logger.info("[output] JSON written: %s", output_path)
 
 
 if __name__ == "__main__":

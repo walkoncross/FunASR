@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fun-ASR-Nano-2512：不带 VAD，适合短音频（< 30s），端到端 LLM-ASR，无需 punc 模型
-# 用法：./transcribe_by_nano_no_vad.sh <音频文件或目录>
+# Fun-ASR-Nano-2512: without VAD, suitable for short audio (< 30s), end-to-end LLM-ASR, no punc model needed
+# Usage: ./transcribe_by_nano_no_vad.sh <audio_file_or_dir>
 input=$1
 
 python transcribe.py \

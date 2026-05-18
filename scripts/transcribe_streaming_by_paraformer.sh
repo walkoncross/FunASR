@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# paraformer-zh-streaming：流式转写，600ms chunk / 300ms lookahead
-# 用法：./transcribe_streaming_by_paraformer.sh <音频文件或目录>
+# paraformer-zh-streaming: streaming transcription, 600ms chunk / 300ms lookahead
+# Usage: ./transcribe_streaming_by_paraformer.sh <audio_file_or_dir>
 input=$1
 
 python transcribe_streaming.py \

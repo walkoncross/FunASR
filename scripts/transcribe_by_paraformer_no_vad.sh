@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# paraformer-zh：不带 VAD，适合短音频（< 30s），字符级时间戳
-# 用法：./transcribe_by_paraformer_no_vad.sh <音频文件或目录>
+# paraformer-zh: without VAD, suitable for short audio (< 30s), character-level timestamps
+# Usage: ./transcribe_by_paraformer_no_vad.sh <audio_file_or_dir>
 input=$1
 
 python transcribe.py \
@@ -10,4 +10,3 @@ python transcribe.py \
   --vad-model "" \
   --punc-model ct-punc \
   --separate-channel
-

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SenseVoiceSmall：不带 VAD，适合短音频（< 30s），多语言 + 情感识别，use_itn 开启数字规范化
-# 用法：./transcribe_by_sensevoice_no_vad.sh <音频文件或目录>
+# SenseVoiceSmall: without VAD, suitable for short audio (< 30s), multilingual + emotion recognition, use_itn enables numeric normalization
+# Usage: ./transcribe_by_sensevoice_no_vad.sh <audio_file_or_dir>
 input=$1
 
 python transcribe.py \
@@ -12,4 +12,3 @@ python transcribe.py \
   --language auto \
   --use-itn \
   --separate-channel
-
