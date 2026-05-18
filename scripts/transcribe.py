@@ -31,7 +31,7 @@ Output format (json):
   }
   start / end 单位为秒；SenseVoice 无时间戳时两者均为 null。
   启用 --silence-gap 时，每个 VAD 段内按静音间隔再切分为多条；
-  默认 silence_gap=0（不切分，每个 VAD 段整体作为一条）。
+  默认 silence_gap=0.5s（按静音间隔切分），设为 0 则每个 VAD 段整体作为一条。
 """
 
 import argparse
@@ -82,8 +82,8 @@ def parse_args() -> argparse.Namespace:
                         help="合并短 VAD 分段（SenseVoice）")
     parser.add_argument("--merge-length-s", type=float, default=15.0,
                         help="合并 VAD 分段的最大时长，秒（SenseVoice，需配合 --merge-vad）")
-    parser.add_argument("--silence-gap", "-sg", type=float, default=0.0, dest="silence_gap",
-                        help="VAD 段内按静音间隔再切分的阈值（秒），0 表示不切分（每 VAD 段整体一条）")
+    parser.add_argument("--silence-gap", "-sg", type=float, default=0.5, dest="silence_gap",
+                        help="按静音间隔切分的阈值（秒），0 表示不切分（整段一条）")
     return parser.parse_args()
 
 
