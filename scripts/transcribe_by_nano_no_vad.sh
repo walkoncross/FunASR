@@ -8,4 +8,5 @@ python transcribe.py \
   -d mps \
   -m FunAudioLLM/Fun-ASR-Nano-2512 \
   --vad-model "" \
-  --punc-model ""
+  --punc-model "" \
+  --separate-channel

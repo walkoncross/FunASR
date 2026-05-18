@@ -101,14 +101,17 @@ python scripts/transcribe.py -i audio.wav \
 {
   "source": "/path/to/audio.wav",
   "filename": "audio.wav",
-  "text": [
-    {"text": "第一段识别结果", "start": 0.0, "end": 5.0},
-    {"text": "第二段识别结果", "start": 5.2, "end": 10.1}
-  ],
   "audio_dur_s": 12.345,
   "transcribe_s": 1.234,
   "rtf": 0.1,
-  "rtfx": 10.0
+  "rtfx": 10.0,
+  "model_name": "paraformer-zh",
+  "vad_model": "fsmn-vad",
+  "punc_model": "ct-punc",
+  "text": [
+    {"text": "第一段识别结果", "start": 0.0, "end": 5.0},
+    {"text": "第二段识别结果", "start": 5.2, "end": 10.1}
+  ]
 }
 ```
 
@@ -180,6 +183,9 @@ python scripts/transcribe_conversation.py -i stereo.wav --silence-gap 1.0
   "transcribe_s": 52.32,
   "rtf": 0.1707,
   "rtfx": 5.86,
+  "model_name": "paraformer-zh",
+  "vad_model": "fsmn-vad",
+  "punc_model": "ct-punc",
   "conversations": [
     {"role": "channel_0", "text": "喂，你好，是袁雪珍女士吗？", "start": 17.17, "end": 19.3},
     {"role": "channel_1", "text": "我知道你应该是那个啊。", "start": 20.7, "end": 22.5}
@@ -242,16 +248,18 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 {
   "source": "/path/to/audio.wav",
   "filename": "audio.wav",
+  "audio_dur_s": 5.12,
+  "transcribe_s": 1.23,
+  "rtf": 0.24,
+  "rtfx": 4.16,
+  "model_name": "paraformer-zh-streaming",
+  "punc_model": "ct-punc",
   "text": "完整转写文本",
   "chunks": [
     {"chunk": 0, "is_final": false, "text": "部分识别结果"},
     {"chunk": 1, "is_final": false, "text": "更多识别结果"},
     {"chunk": 42, "is_final": true, "text": "最终完整文本"}
-  ],
-  "audio_dur_s": 5.12,
-  "transcribe_s": 1.23,
-  "rtf": 0.24,
-  "rtfx": 4.16
+  ]
 }
 ```
 

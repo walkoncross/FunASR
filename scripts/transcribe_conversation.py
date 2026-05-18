@@ -391,6 +391,9 @@ def main() -> None:
         "transcribe_s": round(total_transcribe_s, 3),
         "rtf": rtf,
         "rtfx": round(1 / rtf, 2) if rtf else None,
+        "model_name": Path(args.model).name or args.model,
+        "vad_model": Path(args.vad_model).name if args.vad_model else None,
+        "punc_model": Path(args.punc_model).name if args.punc_model else None,
         "conversations": all_utterances,
     }
 

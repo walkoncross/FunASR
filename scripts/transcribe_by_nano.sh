@@ -9,4 +9,6 @@ python transcribe.py \
   -m FunAudioLLM/Fun-ASR-Nano-2512 \
   --vad-model fsmn-vad \
   --punc-model "" \
-  --silence-gap 0.5
+  --silence-gap 0.5 \
+  --separate-channel
+

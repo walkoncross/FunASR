@@ -10,4 +10,6 @@ python transcribe.py \
   --vad-model fsmn-vad \
   --punc-model "" \
   --language auto \
-  --use-itn
+  --use-itn \
+  --separate-channel
+

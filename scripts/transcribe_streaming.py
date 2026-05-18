@@ -25,14 +25,14 @@ Output format (json):
   {
     "source": "...",
     "filename": "...",
+    "audio_dur_s": 5.12,
+    "transcribe_s": 1.23,
+    "rtf": 0.24,
     "text": "完整转写文本",
     "chunks": [
       {"chunk": 0, "is_final": false, "text": "部分识别"},
       ...
-    ],
-    "audio_dur_s": 5.12,
-    "transcribe_s": 1.23,
-    "rtf": 0.24
+    ]
   }
 """
 
@@ -186,12 +186,14 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
     return {
         "source": audio_path,
         "filename": os.path.basename(audio_path),
-        "text": final_text,
-        "chunks": chunks_out,
         "audio_dur_s": round(audio_dur_s, 3),
         "transcribe_s": round(elapsed, 3),
         "rtf": rtf,
         "rtfx": round(1 / rtf, 2) if rtf else None,
+        "model_name": Path(args.model).name or args.model,
+        "punc_model": Path(args.punc_model).name if args.punc_model else None,
+        "text": final_text,
+        "chunks": chunks_out,
     }
 
 

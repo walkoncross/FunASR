@@ -21,13 +21,13 @@ Output format (json):
   {
     "source": "...",
     "filename": "...",
+    "audio_dur_s": 12.34,
+    "transcribe_s": 1.23,
+    "rtf": 0.1,
     "text": [
       {"text": "识别结果", "start": 0.0, "end": 5.0},
       ...
-    ],
-    "audio_dur_s": 12.34,
-    "transcribe_s": 1.23,
-    "rtf": 0.1
+    ]
   }
   start / end 单位为秒；SenseVoice 无时间戳时两者均为 null。
   启用 --silence-gap 时，每个 VAD 段内按静音间隔再切分为多条；
@@ -434,11 +434,14 @@ def transcribe_file(model, audio_path: str, args) -> dict:
     return {
         "source": audio_path,
         "filename": os.path.basename(audio_path),
-        "text": text_list,
         "audio_dur_s": round(audio_dur_s, 3),
         "transcribe_s": round(elapsed, 3),
         "rtf": rtf,
         "rtfx": round(1 / rtf, 2) if rtf else None,
+        "model_name": Path(args.model).name or args.model,
+        "vad_model": Path(args.vad_model).name if args.vad_model else None,
+        "punc_model": Path(args.punc_model).name if args.punc_model else None,
+        "text": text_list,
     }
 
 

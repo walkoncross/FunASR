@@ -8,4 +8,6 @@ python transcribe.py \
   -d mps \
   -m paraformer-zh \
   --vad-model "" \
-  --punc-model ct-punc
+  --punc-model ct-punc \
+  --separate-channel
+

@@ -9,4 +9,6 @@ python transcribe.py \
   -m paraformer-zh \
   --vad-model fsmn-vad \
   --punc-model ct-punc \
-  --silence-gap 0.5
+  --silence-gap 0.5 \
+  --separate-channel
+
