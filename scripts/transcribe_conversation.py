@@ -8,24 +8,35 @@ sorts utterances from both channels by timestamp, and outputs a conversation JSO
 Usage:
   python scripts/transcribe_conversation.py -i <stereo_audio> [OPTIONS]
 
-  --model/-m          ASR model name or local path (default: paraformer-zh)
-  --vad-model/-vm     VAD model name or path (default: fsmn-vad)
-  --punc-model/-pm    Punctuation model name or path (default: ct-punc)
-  --input/-i          Stereo audio file (required)
-  --output/-o         JSON output path (default: results/<basename>-conversation.json)
-  --hub               Model source: modelscope / hf (default: modelscope)
-  --device/-d         Inference device: cpu / cuda:0 / mps (default: cpu)
-  --batch-size/-bs    Inference batch size (default: 1)
-  --channels/-c       Number of channels to process (default: 2)
-  --silence-gap/-sg   Silence gap threshold in seconds for splitting utterances (default: 0.5)
-  --hotwords          Hotwords string, space-separated
-  --enable-update     Enable FunASR version check (disabled by default)
+  --model/-m              ASR model name or local path (default: paraformer-zh)
+  --vad-model/-vm         VAD model name or path (default: fsmn-vad)
+  --punc-model/-pm        Punctuation model name or path (default: ct-punc)
+  --input/-i              Stereo audio file (required)
+  --output/-o             JSON output path (default: results/<basename>.<model>.<vad>.<punc>.conversation.json)
+  --hub                   Model source: modelscope / hf (default: modelscope)
+  --device/-d             Inference device: cpu / cuda:0 / mps (default: cpu)
+  --batch-size/-bs        Inference batch size (default: 1)
+  --channels/-c           Number of channels to process (default: 2)
+  --silence-gap/-sg       Silence gap threshold in seconds for splitting utterances (default: 0.5)
+  --hotwords              Hotwords string, space-separated
+  --enable-update         Enable FunASR version check (disabled by default)
+  --language              Language code (SenseVoice): auto / zh / en / yue / ja / ko / nospeech
+  --use-itn               Enable inverse text normalization ITN (SenseVoice)
+  --merge-vad             Merge short VAD segments (SenseVoice; reduces splitting granularity)
+  --merge-length-s        Max duration in seconds to merge VAD segments (default: 15.0, requires --merge-vad)
 
-Output format:
+Output format (json):  <stem>.<model>.<vad>.<punc>.conversation.json
   {
     "source": "...",
     "filename": "...",
     "channels": 2,
+    "audio_dur_s": 306.68,
+    "transcribe_s": 52.32,
+    "rtf": 0.17,
+    "rtfx": 5.86,
+    "model_name": "paraformer-zh",
+    "vad_model": "fsmn-vad",
+    "punc_model": "ct-punc",
     "conversations": [
       {"role": "channel_0", "text": "...", "start": 0.0, "end": 1.2},
       {"role": "channel_1", "text": "...", "start": 0.9, "end": 2.3},

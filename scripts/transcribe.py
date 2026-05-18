@@ -5,25 +5,34 @@ FunASR speech transcription script (ModelScope / HuggingFace backend)
 Usage:
   python scripts/transcribe.py -i <audio_file_or_dir> [OPTIONS]
 
-  --model/-m          ASR model name or local path (default: paraformer-zh)
-  --vad-model/-vm     VAD model name or path (default: fsmn-vad)
-  --punc-model/-pm    Punctuation model name or path (default: ct-punc)
-  --input/-i          Audio file or directory (required)
-  --output/-o         Output directory (default: ./results/)
-  --hub               Model source: modelscope / hf (default: modelscope)
-  --device/-d         Inference device: cpu / cuda:0 / mps (default: cpu)
-  --batch-size/-bs    Inference batch size (default: 1)
+  --model/-m              ASR model name or local path (default: paraformer-zh)
+  --vad-model/-vm         VAD model name or path (default: fsmn-vad)
+  --punc-model/-pm        Punctuation model name or path (default: ct-punc)
+  --input/-i              Audio file or directory (required)
+  --output/-o             Output directory (default: ./results/)
+  --hub                   Model source: modelscope / hf (default: modelscope)
+  --device/-d             Inference device: cpu / cuda:0 / mps (default: cpu)
+  --batch-size/-bs        Inference batch size (default: 1)
   --separate-channel/-sc  Split channels and transcribe each separately
-  --hotwords          Hotwords string, space-separated
-  --enable-update     Enable FunASR version check (disabled by default)
+  --hotwords              Hotwords string, space-separated
+  --enable-update         Enable FunASR version check (disabled by default)
+  --language              Language code (SenseVoice): auto / zh / en / yue / ja / ko / nospeech
+  --use-itn               Enable inverse text normalization ITN (SenseVoice)
+  --merge-vad             Merge short VAD segments (SenseVoice)
+  --merge-length-s        Max duration in seconds to merge VAD segments (default: 15.0, requires --merge-vad)
+  --silence-gap/-sg       Silence gap threshold in seconds for splitting; 0 = no splitting (default: 0.5)
 
-Output format (json):
+Output format (json):  <stem>.<model>.<vad>.<punc>.json
   {
     "source": "...",
     "filename": "...",
     "audio_dur_s": 12.34,
     "transcribe_s": 1.23,
     "rtf": 0.1,
+    "rtfx": 10.0,
+    "model_name": "paraformer-zh",
+    "vad_model": "fsmn-vad",
+    "punc_model": "ct-punc",
     "text": [
       {"text": "recognition result", "start": 0.0, "end": 5.0},
       ...

@@ -22,13 +22,17 @@ Usage:
   --hotwords              Hotwords string, space-separated
   --enable-update         Enable FunASR version check (disabled by default)
 
-Output format (json):
+Output format (json):  <stem>.<model>.no-vad.<punc>.json
   {
     "source": "...",
     "filename": "...",
     "audio_dur_s": 5.12,
     "transcribe_s": 1.23,
     "rtf": 0.24,
+    "rtfx": 4.16,
+    "model_name": "paraformer-zh-streaming",
+    "vad_model": null,
+    "punc_model": "ct-punc",
     "text": "full transcription text",
     "chunks": [
       {"chunk": 0, "is_final": false, "text": "partial result"},
