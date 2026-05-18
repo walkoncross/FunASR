@@ -14,9 +14,10 @@
 
 | 脚本 | 模型 | 用途 |
 |------|------|------|
-| `transcribe_by_nano.sh` | Fun-ASR-Nano-2512 | 单文件/目录转写 |
-| `transcribe_by_sensevoice.sh` | SenseVoiceSmall | 单文件/目录转写，多语言 + ITN |
-| `transcribe_by_paraformer.sh` | paraformer-zh | 单文件/目录转写，字符级时间戳 |
+| `transcribe_by_nano.sh` | Fun-ASR-Nano-2512 | 单文件/目录转写（带 VAD，长音频） |
+| `transcribe_by_sensevoice.sh` | SenseVoiceSmall | 单文件/目录转写，多语言 + ITN（带 VAD，长音频） |
+| `transcribe_by_sensevoice_no_vad.sh` | SenseVoiceSmall | 同上，不带 VAD（短音频 < 30s，速度更快） |
+| `transcribe_by_paraformer.sh` | paraformer-zh | 单文件/目录转写，字符级时间戳（带 VAD，长音频） |
 | `transcribe_conversation_by_nano.sh` | Fun-ASR-Nano-2512 | 双声道对话转写 |
 | `transcribe_conversation_by_sensevoice.sh` | SenseVoiceSmall | 双声道对话转写，多语言 |
 | `transcribe_conversation_by_paraformer.sh` | paraformer-zh | 双声道对话转写，多轮精度最高 |
@@ -254,6 +255,21 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 | paraformer-zh-streaming | 无 | 否 | 需 ct-punc | 是 | 实时低延迟场景 |
 | SenseVoiceSmall | token 级（s） | 是 | 内置 ITN | 否 | 多语言、情感识别 |
 | Fun-ASR-Nano-2512 | token 级（s） | 否 | 内置 | 否 | 端到端，无需额外模型 |
+
+---
+
+## 关于 VAD 与长音频
+
+三种模型（paraformer-zh、SenseVoiceSmall、Fun-ASR-Nano）的 encoder 均无硬截断限制，但**长音频不带 VAD 存在两个问题**：
+
+1. **OOM**：encoder 的 attention 复杂度为 O(T²)，长音频显存消耗随时长平方增长
+2. **精度下降**：模型训练时单段最长约 30s，超长输入识别准确率下降
+
+**建议**：
+- 长音频（> 30s）：带 `--vad-model fsmn-vad`，VAD 先切段再分别识别，支持任意时长
+- 短音频（< 30s）：可省略 VAD（`--vad-model ""`），减少一次模型加载，延迟更低
+
+**`--silence-gap` 与 VAD 的关系**：`--silence-gap` 是在 VAD 分段完成、模型推理返回后，对时间戳在本地再做二次切分；不带 VAD 时该参数无效（整段只有 1 条结果）。SenseVoice 因无时间戳，`--silence-gap` 同样无效。
 
 ---
 
