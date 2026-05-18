@@ -89,7 +89,13 @@ python scripts/transcribe.py -i audio.wav \
 
 ### 输出格式
 
-统一输出 JSON，文件名为 `<stem>.funasr.json`。
+输出 JSON，文件名格式为 `<stem>.<model>.<vad>.<punc>.json`。
+
+示例：
+- `录音1.paraformer-zh.fsmn-vad.ct-punc.json`
+- `录音1.SenseVoiceSmall.fsmn-vad.no-punc.json`
+- `录音1.Fun-ASR-Nano-2512.fsmn-vad.no-punc.json`
+- `录音1.paraformer-zh.no-vad.ct-punc.json`
 
 ```json
 {
@@ -106,7 +112,7 @@ python scripts/transcribe.py -i audio.wav \
 }
 ```
 
-- `start` / `end` 单位为秒；SenseVoice 无时间戳时两者为 `null`
+- `start` / `end` 单位为秒；SenseVoice 各段 start/end 对应 VAD 段边界
 - `rtf`：实时率（越小越快）；`rtfx`：逆实时率 = `1/rtf`（越大越快）
 - 声道分离模式（`-sc`）时，文件名附加 `_channel0` / `_channel1` 后缀，JSON 中额外包含 `"channel": 0`
 
@@ -131,7 +137,7 @@ python scripts/transcribe_conversation.py -i <立体声音频> [OPTIONS]
 | 参数 | 简写 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--input` | `-i` | 必填 | 立体声音频文件 |
-| `--output` | `-o` | `results/<basename>-conversation.json` | JSON 输出路径 |
+| `--output` | `-o` | `results/<basename>.<model>.<vad>.<punc>.conversation.json` | JSON 输出路径 |
 | `--model` | `-m` | `paraformer-zh` | ASR 模型名称或本地路径 |
 | `--vad-model` | `-vm` | `fsmn-vad` | VAD 模型名称或路径 |
 | `--punc-model` | `-pm` | `ct-punc` | 标点模型名称或路径，留空则禁用 |
@@ -162,6 +168,8 @@ python scripts/transcribe_conversation.py -i stereo.wav --silence-gap 1.0
 ```
 
 ### 输出格式
+
+文件名格式：`<stem>.<model>.<vad>.<punc>.conversation.json`
 
 ```json
 {
@@ -228,6 +236,8 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 
 ### 输出格式
 
+文件名格式：`<stem>.<model>.no-vad.<punc>.json`（流式无 VAD）
+
 ```json
 {
   "source": "/path/to/audio.wav",
@@ -271,7 +281,7 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 - 长音频（> 30s）：带 `--vad-model fsmn-vad`，VAD 先切段再分别识别，支持任意时长
 - 短音频（< 30s）：可省略 VAD（`--vad-model ""`），减少一次模型加载，延迟更低
 
-**`--silence-gap` 与 VAD 的关系**：`--silence-gap` 是在 VAD 分段完成、模型推理返回后，对时间戳在本地再做二次切分；不带 VAD 时该参数无效（整段只有 1 条结果）。SenseVoice 因无时间戳，`--silence-gap` 同样无效。
+**`--silence-gap` 与 VAD 的关系**：`--silence-gap` 是在 VAD 分段完成、模型推理返回后，对时间戳在本地再做二次切分；不带 VAD 时该参数无效（整段只有 1 条结果）。SenseVoice 按 VAD 段边界切分，`--silence-gap` 不影响切分粒度（每段对应一个 VAD 段）。
 
 ---
 
