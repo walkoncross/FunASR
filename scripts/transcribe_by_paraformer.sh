@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# paraformer-zh：字符级时间戳，支持热词，punc 模型加标点
+# paraformer-zh：带 VAD，适合长音频，字符级时间戳，punc 模型加标点
 # 用法：./transcribe_by_paraformer.sh <音频文件或目录>
 input=$1
 

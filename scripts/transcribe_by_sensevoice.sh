@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SenseVoiceSmall：多语言 + 情感识别，use_itn 开启数字规范化
+# SenseVoiceSmall：带 VAD，适合长音频，多语言 + 情感识别，use_itn 开启数字规范化
 # 用法：./transcribe_by_sensevoice.sh <音频文件或目录>
 input=$1
 
