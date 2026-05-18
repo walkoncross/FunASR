@@ -280,7 +280,7 @@ class CTTransformer(torch.nn.Module):
             mini_sentence = cache_sent + mini_sentence
             mini_sentence_id = np.concatenate((cache_sent_id, mini_sentence_id), axis=0)
             data = {
-                "text": torch.unsqueeze(torch.from_numpy(mini_sentence_id), 0),
+                "text": torch.unsqueeze(torch.from_numpy(mini_sentence_id).long(), 0),
                 "text_lengths": torch.from_numpy(np.array([len(mini_sentence_id)], dtype="int32")),
             }
             data = to_device(data, kwargs["device"])

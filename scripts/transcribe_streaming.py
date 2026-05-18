@@ -21,6 +21,7 @@ Usage:
   --decoder-look-back     Number of decoder cross-attention look-back encoder chunks (default: 1)
   --hotwords              Hotwords string, space-separated
   --enable-update         Enable FunASR version check (disabled by default)
+  --separate-channel/-sc  Split channels and transcribe each separately
 
 Output format (json):  <stem>.<model>.no-vad.<punc>.json
   {
@@ -39,6 +40,8 @@ Output format (json):  <stem>.<model>.no-vad.<punc>.json
       ...
     ]
   }
+  With --separate-channel, filenames get a _channel0 / _channel1 suffix and
+  the JSON includes "channel": 0.
 """
 
 import argparse
@@ -46,6 +49,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -97,6 +101,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hotwords", default=None, help="Hotwords string, space-separated")
     parser.add_argument("--enable-update", action="store_true", default=False,
                         help="Enable FunASR version check (disabled by default)")
+    parser.add_argument("--separate-channel", "-sc", action="store_true", default=False,
+                        help="Split channels and transcribe each separately")
     return parser.parse_args()
 
 
@@ -127,19 +133,28 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
     Feeds audio in chunk_size[1]*FRAME_MS ms blocks and collects per-chunk output.
     Returns a dict with the full text and per-chunk results.
     """
-    chunk_size = args.chunk_size
-    encoder_look_back = args.encoder_look_back
-    decoder_look_back = args.decoder_look_back
-
-    # chunk stride: chunk_size[1] frames * FRAME_MS ms * sample_rate / 1000
-    chunk_stride = chunk_size[1] * FRAME_MS * SAMPLE_RATE // 1000  # samples per chunk
-
     speech, sample_rate = sf.read(audio_path, dtype="float32")
     if speech.ndim > 1:
         speech = speech[:, 0]  # take first channel
     if sample_rate != SAMPLE_RATE:
         logger.warning("sample rate %d != %d; model may error; consider resampling first",
                        sample_rate, SAMPLE_RATE)
+    result = _stream_one_channel(model, speech, sample_rate, args)
+    result["source"] = audio_path
+    result["filename"] = os.path.basename(audio_path)
+    return result
+
+
+def _stream_one_channel(model, speech, sample_rate: int, args) -> dict:
+    """
+    Stream-transcribe a single mono numpy array.
+    Returns a partial dict (without source/filename/channel).
+    """
+    chunk_size = args.chunk_size
+    encoder_look_back = args.encoder_look_back
+    decoder_look_back = args.decoder_look_back
+
+    chunk_stride = chunk_size[1] * FRAME_MS * SAMPLE_RATE // 1000  # samples per chunk
 
     audio_dur_s = len(speech) / sample_rate
     total_chunk_num = int((len(speech) - 1) / chunk_stride + 1)
@@ -149,7 +164,6 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
 
     cache = {}
     chunks_out = []
-    full_text_parts = []
 
     t0 = time.perf_counter()
     for i in range(total_chunk_num):
@@ -174,11 +188,6 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
         if text:
             status = "[FINAL]" if is_final else f"[{i:04d}]"
             logger.info("  %s %s", status, text)
-            if is_final:
-                full_text_parts.append(text)
-            else:
-                # Streaming output is a cumulative prefix; the is_final chunk has the complete text
-                pass
 
     elapsed = time.perf_counter() - t0
 
@@ -189,8 +198,6 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
 
     rtf = round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None
     return {
-        "source": audio_path,
-        "filename": os.path.basename(audio_path),
         "audio_dur_s": round(audio_dur_s, 3),
         "transcribe_s": round(elapsed, 3),
         "rtf": rtf,
@@ -203,13 +210,17 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
     }
 
 
-def save_result(result: dict, audio_path: Path, output_dir: Path, args=None):
+def save_result(result: dict, audio_path: Path, output_dir: Path, args=None,
+                channel: int | None = None):
     output_dir.mkdir(parents=True, exist_ok=True)
+    base = audio_path.stem
+    if channel is not None:
+        base = f"{base}_channel{channel}"
     if args is not None:
         tag = _model_tag(args.model, args.punc_model or "")
-        filename = f"{audio_path.stem}.{tag}.json"
+        filename = f"{base}.{tag}.json"
     else:
-        filename = f"{audio_path.stem}.streaming.json"
+        filename = f"{base}.streaming.json"
     out_path = output_dir / filename
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("[output] saved: %s", out_path)
@@ -235,6 +246,7 @@ def main() -> None:
     logger.info("[config] hub=%s  device=%s", args.hub, args.device)
     logger.info("[config] chunk_size=%s  encoder_look_back=%d  decoder_look_back=%d",
                 args.chunk_size, args.encoder_look_back, args.decoder_look_back)
+    logger.info("[config] separate_channel=%s", args.separate_channel)
     logger.info("[input]  %s", args.input)
 
     t0 = time.perf_counter()
@@ -252,13 +264,36 @@ def main() -> None:
 
     for i, f in enumerate(files, 1):
         logger.info("\n[%d/%d] processing: %s", i, len(files), f.name)
-        result = transcribe_streaming(model, str(f), args)
-        logger.info("[result] RTF=%.4f  RTFx=%.2f  text: %s",
-                    result["rtf"] or 0, result["rtfx"] or 0, result["text"])
-        save_result(result, f, output_dir, args=args)
 
-        total_audio_s += result["audio_dur_s"]
-        total_transcribe_s += result["transcribe_s"]
+        if args.separate_channel:
+            audio_data, sample_rate = sf.read(str(f), dtype="float32", always_2d=True)
+            if sample_rate != SAMPLE_RATE:
+                logger.warning("sample rate %d != %d; model may error; consider resampling first",
+                               sample_rate, SAMPLE_RATE)
+            num_channels = audio_data.shape[1]
+            logger.info("[channel] detected %d channel(s), transcribing each separately", num_channels)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                for ch in range(num_channels):
+                    logger.info("[channel %d] transcribing...", ch)
+                    result = _stream_one_channel(model, audio_data[:, ch], sample_rate, args)
+                    result["source"] = str(f)
+                    result["filename"] = f.name
+                    result["channel"] = ch
+                    logger.info("[channel %d] RTF=%.4f  RTFx=%.2f  text: %s",
+                                ch, result["rtf"] or 0, result["rtfx"] or 0, result["text"])
+                    save_result(result, f, output_dir, args=args, channel=ch)
+
+                    total_audio_s += result["audio_dur_s"]
+                    total_transcribe_s += result["transcribe_s"]
+        else:
+            result = transcribe_streaming(model, str(f), args)
+            logger.info("[result] RTF=%.4f  RTFx=%.2f  text: %s",
+                        result["rtf"] or 0, result["rtfx"] or 0, result["text"])
+            save_result(result, f, output_dir, args=args)
+
+            total_audio_s += result["audio_dur_s"]
+            total_transcribe_s += result["transcribe_s"]
 
     logger.info("\n[summary] files processed: %d", len(files))
     logger.info("[summary] total audio duration: %.1fs", total_audio_s)

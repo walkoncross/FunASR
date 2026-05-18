@@ -331,7 +331,7 @@ class AutoModel:
             results = self.inference(
                 input, input_len=input_len, progress_callback=progress_callback, **cfg
             )
-            if self.punc_model is not None:
+            if self.punc_model is not None and cfg.get("is_final", True):
                 deep_update(self.punc_kwargs, cfg)
                 for result in results:
                     punc_res = self.inference(
