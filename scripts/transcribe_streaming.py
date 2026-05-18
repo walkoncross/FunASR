@@ -21,7 +21,7 @@ Usage:
   --decoder-look-back     Number of decoder cross-attention look-back encoder chunks (default: 1)
   --hotwords              Hotwords string, space-separated
   --enable-update         Enable FunASR version check (disabled by default)
-  --separate-channel/-sc  Split channels and transcribe each separately
+  --separate-channels/-sc  Split channels and transcribe each separately
 
 Output format (json):  <stem>.streaming.<model>.no-vad.<punc>.json
                        <stem>.channel0.streaming.<model>.no-vad.<punc>.json  (with --separate-channel)
@@ -47,7 +47,7 @@ Output format (json):  <stem>.streaming.<model>.no-vad.<punc>.json
       ...
     ]
   }
-  With --separate-channel, filenames get a _channel0 / _channel1 suffix and
+  With --separate-channels, filenames get a _channel0 / _channel1 suffix and
   the JSON includes "channel": 0.
 """
 
@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hotwords", default=None, help="Hotwords string, space-separated")
     parser.add_argument("--enable-update", action="store_true", default=False,
                         help="Enable FunASR version check (disabled by default)")
-    parser.add_argument("--separate-channel", "-sc", action="store_true", default=False,
+    parser.add_argument("--separate-channels", "-sc", action="store_true", default=False,
                         help="Split channels and transcribe each separately")
     return parser.parse_args()
 
@@ -198,10 +198,8 @@ def _stream_one_channel(model, speech, sample_rate: int, args) -> dict:
 
     elapsed = time.perf_counter() - t0
 
-    # Final text: use the is_final chunk (complete output); fall back to joining all non-empty chunks
-    final_text = chunks_out[-1]["text"] if chunks_out else ""
-    if not final_text:
-        final_text = " ".join(c["text"] for c in chunks_out if c["text"])
+    # Streaming mode: each chunk emits incremental tokens; concatenate all to get the full transcript.
+    final_text = "".join(c["text"] for c in chunks_out if c["text"])
 
     rtf = round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None
     return {
@@ -259,7 +257,7 @@ def main() -> None:
     logger.info("[config] hub=%s  device=%s", args.hub, args.device)
     logger.info("[config] chunk_size=%s  encoder_look_back=%d  decoder_look_back=%d",
                 args.chunk_size, args.encoder_look_back, args.decoder_look_back)
-    logger.info("[config] separate_channel=%s", args.separate_channel)
+    logger.info("[config] separate_channels=%s", args.separate_channels)
     logger.info("[input]  %s", args.input)
 
     t0 = time.perf_counter()
@@ -278,7 +276,7 @@ def main() -> None:
     for i, f in enumerate(files, 1):
         logger.info("\n[%d/%d] processing: %s", i, len(files), f.name)
 
-        if args.separate_channel:
+        if args.separate_channels:
             audio_data, sample_rate = sf.read(str(f), dtype="float32", always_2d=True)
             if sample_rate != SAMPLE_RATE:
                 logger.warning("sample rate %d != %d; model may error; consider resampling first",
