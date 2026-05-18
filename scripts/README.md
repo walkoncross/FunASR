@@ -12,16 +12,18 @@
 
 ### 快捷脚本（按模型预设参数）
 
-| 脚本 | 模型 | 用途 |
-|------|------|------|
-| `transcribe_by_nano.sh` | Fun-ASR-Nano-2512 | 单文件/目录转写（带 VAD，长音频） |
-| `transcribe_by_sensevoice.sh` | SenseVoiceSmall | 单文件/目录转写，多语言 + ITN（带 VAD，长音频） |
-| `transcribe_by_sensevoice_no_vad.sh` | SenseVoiceSmall | 同上，不带 VAD（短音频 < 30s，速度更快） |
-| `transcribe_by_paraformer.sh` | paraformer-zh | 单文件/目录转写，字符级时间戳（带 VAD，长音频） |
-| `transcribe_conversation_by_nano.sh` | Fun-ASR-Nano-2512 | 双声道对话转写 |
-| `transcribe_conversation_by_sensevoice.sh` | SenseVoiceSmall | 双声道对话转写，多语言 |
-| `transcribe_conversation_by_paraformer.sh` | paraformer-zh | 双声道对话转写，多轮精度最高 |
-| `transcribe_streaming_by_paraformer.sh` | paraformer-zh-streaming | 流式转写 |
+| 脚本 | 模型 | VAD | 用途 |
+|------|------|-----|------|
+| `transcribe_by_nano.sh` | Fun-ASR-Nano-2512 | 带 | 单文件/目录转写（长音频） |
+| `transcribe_by_nano_no_vad.sh` | Fun-ASR-Nano-2512 | 不带 | 同上（短音频 < 30s，速度更快） |
+| `transcribe_by_sensevoice.sh` | SenseVoiceSmall | 带 | 多语言 + ITN（长音频） |
+| `transcribe_by_sensevoice_no_vad.sh` | SenseVoiceSmall | 不带 | 多语言 + ITN（短音频 < 30s） |
+| `transcribe_by_paraformer.sh` | paraformer-zh | 带 | 字符级时间戳（长音频） |
+| `transcribe_by_paraformer_no_vad.sh` | paraformer-zh | 不带 | 字符级时间戳（短音频 < 30s） |
+| `transcribe_conversation_by_nano.sh` | Fun-ASR-Nano-2512 | 带 | 双声道对话转写 |
+| `transcribe_conversation_by_sensevoice.sh` | SenseVoiceSmall | 带 | 双声道对话转写，多语言 |
+| `transcribe_conversation_by_paraformer.sh` | paraformer-zh | 带 | 双声道对话转写，精度最高 |
+| `transcribe_streaming_by_paraformer.sh` | paraformer-zh-streaming | — | 流式转写 |
 
 ---
 
