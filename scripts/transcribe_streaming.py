@@ -191,6 +191,7 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
         "rtf": rtf,
         "rtfx": round(1 / rtf, 2) if rtf else None,
         "model_name": Path(args.model).name or args.model,
+        "vad_model": None,
         "punc_model": Path(args.punc_model).name if args.punc_model else None,
         "text": final_text,
         "chunks": chunks_out,

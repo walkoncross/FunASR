@@ -253,6 +253,7 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
   "rtf": 0.24,
   "rtfx": 4.16,
   "model_name": "paraformer-zh-streaming",
+  "vad_model": null,
   "punc_model": "ct-punc",
   "text": "完整转写文本",
   "chunks": [
