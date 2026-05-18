@@ -55,6 +55,7 @@ python scripts/transcribe.py -i <音频文件或目录> [OPTIONS]
 | `--use-itn` | | `False` | 启用标点与数字规范化 ITN（SenseVoice） |
 | `--merge-vad` | | `False` | 合并短 VAD 分段（SenseVoice） |
 | `--merge-length-s` | | `15.0` | 合并 VAD 分段的最大时长，秒（需配合 `--merge-vad`） |
+| `--silence-gap` | `-sg` | `0.5` | 按静音间隔切分的阈值（秒），`0` 表示不切分 |
 
 ### 示例
 
@@ -87,22 +88,6 @@ python scripts/transcribe.py -i audio.wav \
 
 统一输出 JSON，文件名为 `<stem>.funasr.json`。
 
-**默认（无 `--timestamp`）**：
-```json
-{
-  "source": "/path/to/audio.wav",
-  "filename": "audio.wav",
-  "text": [
-    "第一段识别结果",
-    "第二段识别结果"
-  ],
-  "audio_dur_s": 12.345,
-  "transcribe_s": 1.234,
-  "rtf": 0.1
-}
-```
-
-**启用 `--timestamp`**：
 ```json
 {
   "source": "/path/to/audio.wav",
@@ -113,11 +98,14 @@ python scripts/transcribe.py -i audio.wav \
   ],
   "audio_dur_s": 12.345,
   "transcribe_s": 1.234,
-  "rtf": 0.1
+  "rtf": 0.1,
+  "rtfx": 10.0
 }
 ```
 
-声道分离模式（`-sc`）时，文件名附加 `_channel0` / `_channel1` 后缀，JSON 中额外包含 `"channel": 0`。
+- `start` / `end` 单位为秒；SenseVoice 无时间戳时两者为 `null`
+- `rtf`：实时率（越小越快）；`rtfx`：逆实时率 = `1/rtf`（越大越快）
+- 声道分离模式（`-sc`）时，文件名附加 `_channel0` / `_channel1` 后缀，JSON 中额外包含 `"channel": 0`
 
 ---
 
@@ -177,6 +165,10 @@ python scripts/transcribe_conversation.py -i stereo.wav --silence-gap 1.0
   "source": "/path/to/stereo.wav",
   "filename": "stereo.wav",
   "channels": 2,
+  "audio_dur_s": 306.68,
+  "transcribe_s": 52.32,
+  "rtf": 0.1707,
+  "rtfx": 5.86,
   "conversations": [
     {"role": "channel_0", "text": "喂，你好，是袁雪珍女士吗？", "start": 17.17, "end": 19.3},
     {"role": "channel_1", "text": "我知道你应该是那个啊。", "start": 20.7, "end": 22.5}
@@ -233,7 +225,6 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 
 ### 输出格式
 
-**json**：
 ```json
 {
   "source": "/path/to/audio.wav",
@@ -246,7 +237,8 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
   ],
   "audio_dur_s": 5.12,
   "transcribe_s": 1.23,
-  "rtf": 0.24
+  "rtf": 0.24,
+  "rtfx": 4.16
 }
 ```
 
