@@ -33,7 +33,8 @@ Output format (json):  <stem>.<model>.<vad>.<punc>.json
     "model_name": "paraformer-zh",
     "vad_model": "fsmn-vad",
     "punc_model": "ct-punc",
-    "text": [
+    "text": "recognition result one recognition result two",
+    "segments": [
       {"text": "recognition result", "start": 0.0, "end": 5.0},
       ...
     ]
@@ -372,7 +373,7 @@ def _transcribe_sensevoice_segments(model, audio_path: str, generate_kwargs: dic
 
 
 def transcribe_file(model, audio_path: str, args) -> dict:
-    """Transcribe a single file. Returns a dict with a 'text' list of {text, start, end} entries."""
+    """Transcribe a single file. Returns a dict with 'text' (joined string) and 'segments' (list of {text, start, end})."""
     audio_dur_s = _audio_duration(audio_path)
 
     generate_kwargs = {
@@ -403,11 +404,15 @@ def transcribe_file(model, audio_path: str, args) -> dict:
         return {
             "source": audio_path,
             "filename": os.path.basename(audio_path),
-            "text": text_list,
             "audio_dur_s": round(audio_dur_s, 3),
             "transcribe_s": round(elapsed, 3),
             "rtf": rtf,
             "rtfx": round(1 / rtf, 2) if rtf else None,
+            "model_name": Path(args.model).name or args.model,
+            "vad_model": Path(args.vad_model).name if args.vad_model else None,
+            "punc_model": Path(args.punc_model).name if args.punc_model else None,
+            "text": " ".join(s["text"] for s in text_list if s.get("text")),
+            "segments": text_list,
         }
 
     # Prevent VAD from batching multiple segments to avoid "batch decoding not implemented"
@@ -451,7 +456,8 @@ def transcribe_file(model, audio_path: str, args) -> dict:
         "model_name": Path(args.model).name or args.model,
         "vad_model": Path(args.vad_model).name if args.vad_model else None,
         "punc_model": Path(args.punc_model).name if args.punc_model else None,
-        "text": text_list,
+        "text": " ".join(s["text"] for s in text_list if s.get("text")),
+        "segments": text_list,
     }
 
 
@@ -542,7 +548,7 @@ def main() -> None:
                     result["source"] = str(f)
                     result["filename"] = f.name
                     result["channel"] = ch
-                    logger.info("[channel %d] %d segment(s)", ch, len(result["text"]))
+                    logger.info("[channel %d] %d segment(s)", ch, len(result["segments"]))
 
                     save_result(result, f, output_dir, args=args, channel=ch)
 
@@ -550,7 +556,7 @@ def main() -> None:
                     total_transcribe_s += result["transcribe_s"]
         else:
             result = transcribe_file(model, str(f), args)
-            logger.info("[result] %d segment(s)", len(result["text"]))
+            logger.info("[result] %d segment(s)", len(result["segments"]))
             save_result(result, f, output_dir, args=args)
 
             total_audio_s += result["audio_dur_s"]

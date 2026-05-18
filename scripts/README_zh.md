@@ -108,7 +108,8 @@ python scripts/transcribe.py -i audio.wav \
   "model_name": "paraformer-zh",
   "vad_model": "fsmn-vad",
   "punc_model": "ct-punc",
-  "text": [
+  "text": "第一段识别结果 第二段识别结果",
+  "segments": [
     {"text": "第一段识别结果", "start": 0.0, "end": 5.0},
     {"text": "第二段识别结果", "start": 5.2, "end": 10.1}
   ]
