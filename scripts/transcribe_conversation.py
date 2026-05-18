@@ -273,13 +273,65 @@ def _split_sensevoice_raw(raw_text: str) -> list[str]:
     return result
 
 
+def _transcribe_sensevoice_channel(model, wav_path: str, generate_kwargs: dict) -> list[dict]:
+    """
+    SenseVoice + VAD: run VAD first to get segment timings, then infer each segment
+    individually so that start/end timestamps reflect real audio positions.
+    Returns [{"text": ..., "start": s, "end": e}, ...].
+    Falls back to whole-file inference (start/end=0.0) when no VAD model is attached.
+    """
+    vad_model = getattr(model, "vad_model", None)
+    if vad_model is None:
+        results = model.generate(input=wav_path, **generate_kwargs)
+        utterances = []
+        for item in results or []:
+            for seg_text in _split_sensevoice_raw(item.get("text", "").strip()):
+                utterances.append({"text": seg_text, "start": 0.0, "end": 0.0})
+        return utterances
+
+    # Step 1: run VAD to get segment list [[start_ms, end_ms], ...]
+    vad_kwargs = dict(model.vad_kwargs)
+    vad_res = model.inference(wav_path, model=vad_model, kwargs=vad_kwargs)
+    if not vad_res or not vad_res[0].get("value"):
+        return []
+    vadsegments = vad_res[0]["value"]
+
+    # Step 2: load channel audio
+    speech, fs = sf.read(wav_path, dtype="float32", always_2d=False)
+
+    # Step 3: temporarily detach vad_model to avoid re-entering inference_with_vad
+    orig_vad = model.vad_model
+    model.vad_model = None
+    try:
+        utterances = []
+        for seg_ms in vadsegments:
+            start_ms, end_ms = int(seg_ms[0]), int(seg_ms[1])
+            start_sample = int(start_ms / 1000 * fs)
+            end_sample = int(end_ms / 1000 * fs)
+            seg_audio = speech[start_sample:end_sample]
+            if len(seg_audio) == 0:
+                continue
+            seg_results = model.generate(input=seg_audio, **generate_kwargs)
+            for item in seg_results or []:
+                for seg_text in _split_sensevoice_raw(item.get("text", "").strip()):
+                    utterances.append({
+                        "text": seg_text,
+                        "start": round(start_ms / 1000.0, 3),
+                        "end": round(end_ms / 1000.0, 3),
+                    })
+    finally:
+        model.vad_model = orig_vad
+
+    return utterances
+
+
 def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     """
     Transcribe a mono wav file. Returns a list of utterance dicts.
     Supports three model output formats:
       - paraformer:   item["timestamp"] = [[start_ms, end_ms], ...]  (char-level)
       - Fun-ASR-Nano: item["timestamps"] = [{"start_time": s, "end_time": e}, ...]  (token-level, seconds)
-      - SenseVoice:   no timestamps; text contains <|lang|><|emo|><|event|><|itn|> tags
+      - SenseVoice:   VAD segments inferred individually; start/end taken from VAD boundaries
     Utterances are split by --silence-gap; SenseVoice splits at VAD segment boundaries.
     """
     generate_kwargs = {
@@ -300,6 +352,11 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
         generate_kwargs["batch_size_threshold_s"] = 0
         generate_kwargs["batch_size_s"] = 0
 
+    # SenseVoice: infer each VAD segment separately to preserve real timestamps
+    is_sensevoice = re.search(r"sensevoice", args.model, re.IGNORECASE)
+    if is_sensevoice:
+        return _transcribe_sensevoice_channel(model, wav_path, generate_kwargs)
+
     results = model.generate(input=wav_path, **generate_kwargs)
 
     utterances = []
@@ -309,14 +366,6 @@ def transcribe_channel(model, wav_path: str, args) -> list[dict]:
     for item in results:
         text = item.get("text", "").strip()
         if not text:
-            continue
-
-        # SenseVoice output contains raw tags and no timestamps: split at VAD boundaries
-        if _is_sensevoice_output(text):
-            seg_texts = _split_sensevoice_raw(text)
-            for seg_text in seg_texts:
-                if seg_text:
-                    utterances.append({"text": seg_text, "start": 0.0, "end": 0.0})
             continue
 
         # paraformer: "timestamp" (char-level ms list); Fun-ASR-Nano: "timestamps" (token-level seconds dict)
