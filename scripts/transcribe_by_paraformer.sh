@@ -8,4 +8,5 @@ python transcribe.py \
   -d mps \
   -m paraformer-zh \
   --vad-model fsmn-vad \
-  --punc-model ct-punc
+  --punc-model ct-punc \
+  --silence-gap 0.5
