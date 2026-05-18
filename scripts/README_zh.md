@@ -237,6 +237,7 @@ python scripts/transcribe_streaming.py -i <音频文件或目录> [OPTIONS]
 | `--decoder-look-back` | | `1` | Decoder cross-attention 回看 encoder chunk 数 |
 | `--hotwords` | | `None` | 热词字符串，空格分隔 |
 | `--enable-update` | | `False` | 启用 FunASR PyPI 版本检查 |
+| `--separate-channel` | `-sc` | `False` | 分声道独立转写 |
 
 **chunk-size 说明**：`[lookahead, chunk, shift]`，单位为帧（1 帧 = 60ms）。
 - `0 10 5`：600ms chunk，300ms lookahead（默认，平衡延迟与精度）
@@ -256,6 +257,8 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 ### 输出格式
 
 文件名格式：`<stem>.streaming.<model>.no-vad.<punc>.json`（流式无 VAD）
+
+使用 `--separate-channel` 时：`<stem>.channel0.streaming.<model>.no-vad.<punc>.json`
 
 ```json
 {

@@ -237,6 +237,7 @@ python scripts/transcribe_streaming.py -i <audio_file_or_dir> [OPTIONS]
 | `--decoder-look-back` | | `1` | Number of decoder cross-attention look-back encoder chunks |
 | `--hotwords` | | `None` | Hotwords string, space-separated |
 | `--enable-update` | | `False` | Enable FunASR PyPI version check |
+| `--separate-channel` | `-sc` | `False` | Split channels and transcribe each separately |
 
 **chunk-size explained**: `[lookahead, chunk, shift]`, where 1 frame = 60ms.
 - `0 10 5`: 600ms chunk, 300ms lookahead (default — balanced latency and accuracy)
@@ -256,6 +257,8 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 ### Output Format
 
 Filename format: `<stem>.streaming.<model>.no-vad.<punc>.json`
+
+With `--separate-channel`: `<stem>.channel0.streaming.<model>.no-vad.<punc>.json`
 
 ```json
 {
