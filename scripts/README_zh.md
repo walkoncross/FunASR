@@ -190,7 +190,7 @@ python scripts/transcribe_conversation.py -i stereo.wav --silence-gap 1.0
   "transcribe_s": 52.32,
   "rtf": 0.1707,
   "rtfx": 5.86,
-  "vad_s": 0.0,
+  "vad_s": null,
   "vad_rtf": null,
   "vad_rtfx": null,
   "punct_s": null,
