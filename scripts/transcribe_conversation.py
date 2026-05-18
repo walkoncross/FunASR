@@ -34,6 +34,9 @@ Output format (json):  <stem>.<model>.<vad>.<punc>.conversation.json
     "transcribe_s": 52.32,
     "rtf": 0.17,
     "rtfx": 5.86,
+    "vad_s": 0.0,
+    "vad_rtf": null,
+    "vad_rtfx": null,
     "model_name": "paraformer-zh",
     "vad_model": "fsmn-vad",
     "punc_model": "ct-punc",
@@ -356,6 +359,7 @@ def main() -> None:
 
     all_utterances = []
     total_transcribe_s = 0.0
+    total_vad_s = 0.0
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for ch in range(channels_to_process):
@@ -367,6 +371,10 @@ def main() -> None:
             t1 = time.perf_counter()
             utterances = transcribe_channel(model, tmp_wav, args)
             elapsed = time.perf_counter() - t1
+
+            # Approximate VAD time: FunASR runs VAD internally; estimate as a fixed
+            # fraction is not possible, so we record total elapsed and leave vad_s as 0
+            # unless a future hook exposes it.
             total_transcribe_s += elapsed
 
             ch_dur = len(channel_audio) / sample_rate
@@ -388,6 +396,7 @@ def main() -> None:
     all_utterances.sort(key=lambda u: (u["start"], u["role"]))
 
     rtf = round(total_transcribe_s / total_dur_s, 4) if total_dur_s > 0 else None
+    vad_rtf = round(total_vad_s / total_dur_s, 4) if total_dur_s > 0 and total_vad_s > 0 else None
     output = {
         "source": args.input,
         "filename": os.path.basename(args.input),
@@ -396,6 +405,9 @@ def main() -> None:
         "transcribe_s": round(total_transcribe_s, 3),
         "rtf": rtf,
         "rtfx": round(1 / rtf, 2) if rtf else None,
+        "vad_s": round(total_vad_s, 3),
+        "vad_rtf": vad_rtf,
+        "vad_rtfx": round(1 / vad_rtf, 2) if vad_rtf else None,
         "model_name": Path(args.model).name or args.model,
         "vad_model": Path(args.vad_model).name if args.vad_model else None,
         "punc_model": Path(args.punc_model).name if args.punc_model else None,
