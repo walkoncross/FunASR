@@ -10,6 +10,4 @@ python transcribe.py \
   --vad-model fsmn-vad \
   --punc-model "" \
   --language auto \
-  --use-itn \
-  --merge-vad \
-  --merge-length-s 15
+  --use-itn

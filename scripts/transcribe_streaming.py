@@ -54,6 +54,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".mp4", ".aac"}
+
+
+def _model_tag(model_name: str, punc_model: str) -> str:
+    """生成文件名标签，流式无 VAD，只含模型名和 punc 信息。"""
+    name = Path(model_name).name or model_name
+    name = name.replace("/", "-")
+    punc_tag = Path(punc_model).name if punc_model else "no-punc"
+    return f"{name}.no-vad.{punc_tag}"
 FRAME_MS = 60          # paraformer-zh-streaming 每帧 60ms
 SAMPLE_RATE = 16000    # 模型固定采样率
 
@@ -187,9 +195,14 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
     }
 
 
-def save_result(result: dict, audio_path: Path, output_dir: Path):
+def save_result(result: dict, audio_path: Path, output_dir: Path, args=None):
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"{audio_path.stem}.streaming.json"
+    if args is not None:
+        tag = _model_tag(args.model, args.punc_model or "")
+        filename = f"{audio_path.stem}.{tag}.json"
+    else:
+        filename = f"{audio_path.stem}.streaming.json"
+    out_path = output_dir / filename
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("[output] 已保存: %s", out_path)
     return out_path
@@ -233,7 +246,7 @@ def main() -> None:
         logger.info("\n[%d/%d] 处理: %s", i, len(files), f.name)
         result = transcribe_streaming(model, str(f), args)
         logger.info("[result] RTF=%.4f  RTFx=%.2f  文本: %s", result["rtf"] or 0, result["rtfx"] or 0, result["text"])
-        save_result(result, f, output_dir)
+        save_result(result, f, output_dir, args=args)
 
         total_audio_s += result["audio_dur_s"]
         total_transcribe_s += result["transcribe_s"]

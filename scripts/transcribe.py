@@ -136,15 +136,42 @@ def load_model(args) -> "AutoModel":
     return AutoModel(**kwargs)
 
 
+_SENSEVOICE_LANG_RE = re.compile(r"<\|(?:zh|en|yue|ja|ko|nospeech)\|>")
+
+
+def _sensevoice_postprocess(text: str) -> str:
+    """对单段 SenseVoice 原始文本做 rich_transcription_postprocess。"""
+    try:
+        from funasr.utils.postprocess_utils import rich_transcription_postprocess
+        return rich_transcription_postprocess(text)
+    except ImportError:
+        return re.sub(r"<\|[^|]+\|>", "", text).strip()
+
+
 def _clean_text(text: str) -> str:
-    """清除 SenseVoice 原始标签，返回干净文本。"""
-    if text and re.search(r"<\|(?:zh|en|yue|ja|ko|nospeech)\|>", text):
-        try:
-            from funasr.utils.postprocess_utils import rich_transcription_postprocess
-            return rich_transcription_postprocess(text)
-        except ImportError:
-            return re.sub(r"<\|[^|]+\|>", "", text).strip()
+    """清除 SenseVoice 原始标签，返回干净文本（单段）。"""
+    if text and _SENSEVOICE_LANG_RE.search(text):
+        return _sensevoice_postprocess(text)
     return text
+
+
+def _split_sensevoice(text: str) -> list[str]:
+    """
+    将 SenseVoice 多 VAD 段拼接文本按语言标签切分为各段干净文本列表。
+    inference_with_vad 用 ' ' 拼接各段，每段以 <|zh|> 等语言标签开头。
+    返回各段经 postprocess 处理后的非空文本列表；
+    若文本不含语言标签，直接返回 [text]（兼容无标签输出）。
+    """
+    if not _SENSEVOICE_LANG_RE.search(text):
+        return [text.strip()] if text.strip() else []
+    # 以 ' <|lang|>' 为分界点切开（保留各段首部的语言标签）
+    parts = re.split(r"(?= <\|(?:zh|en|yue|ja|ko|nospeech)\|>)", text)
+    result = []
+    for part in parts:
+        cleaned = _sensevoice_postprocess(part.strip())
+        if cleaned:
+            result.append(cleaned)
+    return result
 
 
 def _ts_bounds(ts_list: list) -> tuple[float | None, float | None]:
@@ -177,8 +204,14 @@ def _norm_timestamps(timestamps: list) -> list[tuple[float, float]]:
 def _split_by_gap(text: str, timestamps: list, silence_gap_s: float) -> list[dict]:
     """
     将单条 VAD 段按静音间隔切分为多条话语。
-    silence_gap_s <= 0 时直接整段返回（不切分）。
-    支持 paraformer([[start_ms, end_ms]]) 和 Fun-ASR-Nano([{"start_time":s,"end_time":e}]) 格式。
+    silence_gap_s <= 0 或无时间戳时直接整段返回。
+
+    支持三种输入情形：
+      A) paraformer 无 punc：len(text) == len(timestamps)，字符与 ts 一一对齐
+      B) paraformer + punc ：len(text) > len(timestamps)，punc 在原始字符间插入了标点
+         => 跳过标点字符（不消耗 ts），非标点字符与 ts 一一对齐
+      C) Fun-ASR-Nano      ：timestamps 为 {"start_time":s,"end_time":e} 字典列表，
+         按时间边界切段，文本按空格拆分
     """
     if silence_gap_s <= 0 or not timestamps:
         start_s, end_s = _ts_bounds(timestamps)
@@ -186,36 +219,11 @@ def _split_by_gap(text: str, timestamps: list, silence_gap_s: float) -> list[dic
 
     norm_ts = _norm_timestamps(timestamps)
     silence_gap_ms = silence_gap_s * 1000.0
-    chars = list(text)
-    char_aligned = (len(chars) == len(norm_ts))
 
-    utterances = []
-    if char_aligned:
-        # paraformer：字符与时间戳一一对齐，精确切分
-        seg_tokens: list[str] = []
-        seg_start_ms = norm_ts[0][0]
-        prev_end_ms = norm_ts[0][1]
-        for i, (start_ms, end_ms) in enumerate(norm_ts):
-            gap = start_ms - prev_end_ms
-            if seg_tokens and gap >= silence_gap_ms:
-                utterances.append({
-                    "text": "".join(seg_tokens).strip(),
-                    "start": round(seg_start_ms / 1000.0, 3),
-                    "end": round(prev_end_ms / 1000.0, 3),
-                })
-                seg_tokens = []
-                seg_start_ms = start_ms
-            seg_tokens.append(chars[i])
-            prev_end_ms = end_ms
-        if seg_tokens:
-            utterances.append({
-                "text": "".join(seg_tokens).strip(),
-                "start": round(seg_start_ms / 1000.0, 3),
-                "end": round(prev_end_ms / 1000.0, 3),
-            })
-    else:
-        # Fun-ASR-Nano：token 数与字符数不等，按时间边界切出段落，
-        # inference_with_vad 将各 VAD 段文本以空格拼接，按空格拆分对应各段
+    # 判断格式：Fun-ASR-Nano 的 timestamps 是字典列表
+    is_nano = isinstance(timestamps[0], dict)
+    if is_nano:
+        # C) Fun-ASR-Nano：按时间边界切段，文本按空格拆分对应各段
         seg_ranges: list[tuple[float, float]] = []
         seg_start_ms = norm_ts[0][0]
         prev_end_ms = norm_ts[0][1]
@@ -227,6 +235,7 @@ def _split_by_gap(text: str, timestamps: list, silence_gap_s: float) -> list[dic
         seg_ranges.append((seg_start_ms, prev_end_ms))
 
         parts = text.split(" ") if len(seg_ranges) > 1 else [text]
+        utterances = []
         for idx, (s_ms, e_ms) in enumerate(seg_ranges):
             seg_text = (parts[idx].strip() if idx < len(parts) else "")
             if seg_text:
@@ -235,15 +244,132 @@ def _split_by_gap(text: str, timestamps: list, silence_gap_s: float) -> list[dic
                     "start": round(s_ms / 1000.0, 3),
                     "end": round(e_ms / 1000.0, 3),
                 })
+        return [u for u in utterances if u["text"]]
+
+    # A/B) paraformer：[[start_ms, end_ms], ...]
+    # punc 模型在原始字符间插入标点，导致 len(text) >= len(norm_ts)。
+    # 遍历 text 时，跳过标点字符（不消耗 ts 索引），非标点字符与 ts 一一对齐。
+    # 判断一个字符是否是 punc 插入的标点：不在 norm_ts 对应位置消耗时间戳
+    ts_idx = 0
+    n_ts = len(norm_ts)
+    utterances = []
+    seg_chars: list[str] = []
+    seg_start_ms: float = norm_ts[0][0]
+    prev_end_ms: float = norm_ts[0][1]
+
+    for ch in text:
+        if ts_idx >= n_ts:
+            # 时间戳已用完，剩余字符（标点）追加到末尾段
+            seg_chars.append(ch)
+            continue
+
+        # 判断当前字符是否消耗一个时间戳：
+        # 若字符是 CJK / 字母 / 数字（即非纯标点），消耗一个 ts
+        is_content = bool('\u4e00' <= ch <= '\u9fff'  # CJK
+                          or ch.isalnum())
+        if is_content:
+            start_ms, end_ms = norm_ts[ts_idx]
+            gap = start_ms - prev_end_ms
+            if seg_chars and gap >= silence_gap_ms:
+                utterances.append({
+                    "text": "".join(seg_chars).strip(),
+                    "start": round(seg_start_ms / 1000.0, 3),
+                    "end": round(prev_end_ms / 1000.0, 3),
+                })
+                seg_chars = []
+                seg_start_ms = start_ms
+            seg_chars.append(ch)
+            prev_end_ms = end_ms
+            ts_idx += 1
+        else:
+            # 标点/空格：直接追加，不消耗 ts
+            seg_chars.append(ch)
+
+    if seg_chars:
+        utterances.append({
+            "text": "".join(seg_chars).strip(),
+            "start": round(seg_start_ms / 1000.0, 3),
+            "end": round(prev_end_ms / 1000.0, 3),
+        })
 
     return [u for u in utterances if u["text"]]
+
+
+def _transcribe_sensevoice_segments(model, audio_path: str, generate_kwargs: dict) -> list[dict]:
+    """
+    SenseVoice + VAD 专用：绕过 inference_with_vad 的聚合，
+    先用 VAD 拿到分段时间列表，再对每段单独推理，保留各段的 start/end。
+    返回 [{"text": ..., "start": s, "end": e}, ...] 列表。
+    若 model 没有 vad_model，退回到整段推理（start/end=null）。
+    """
+    import soundfile as sf
+
+    vad_model = getattr(model, "vad_model", None)
+    if vad_model is None:
+        # 无 VAD：直接整段推理
+        results = model.generate(input=audio_path, **generate_kwargs)
+        utterances = []
+        for item in results or []:
+            raw = item.get("text", "").strip()
+            for seg in _split_sensevoice(raw):
+                utterances.append({"text": seg, "start": None, "end": None})
+        return utterances
+
+    # step1: 单独跑 VAD，拿到 vadsegments（单位 ms）
+    vad_kwargs = dict(model.vad_kwargs)
+    vad_res = model.inference(audio_path, model=vad_model, kwargs=vad_kwargs)
+    if not vad_res or not vad_res[0].get("value"):
+        return []
+    vadsegments = vad_res[0]["value"]  # [[start_ms, end_ms], ...]
+
+    # step2: 加载原始音频，确保单声道 1D float32，16kHz
+    speech, fs = sf.read(audio_path, dtype="float32", always_2d=False)
+    if speech.ndim == 2:
+        speech = speech.mean(axis=1)  # 立体声取均值降为单声道
+    if fs != 16000:
+        try:
+            import resampy
+            speech = resampy.resample(speech, fs, 16000)
+        except ImportError:
+            import librosa
+            speech = librosa.resample(speech, orig_sr=fs, target_sr=16000)
+        fs = 16000
+
+    # step3: 对每个 VAD 段单独推理（临时禁用 vad_model，避免再次进入 inference_with_vad）
+    orig_vad = model.vad_model
+    model.vad_model = None
+    try:
+        utterances = []
+        for seg_ms in vadsegments:
+            start_ms, end_ms = int(seg_ms[0]), int(seg_ms[1])
+            start_sample = int(start_ms / 1000 * fs)
+            end_sample = int(end_ms / 1000 * fs)
+            seg_audio = speech[start_sample:end_sample]
+            if len(seg_audio) == 0:
+                continue
+            seg_results = model.generate(input=seg_audio, **generate_kwargs)
+            for item in seg_results or []:
+                raw = item.get("text", "").strip()
+                for seg_text in _split_sensevoice(raw):
+                    utterances.append({
+                        "text": seg_text,
+                        "start": round(start_ms / 1000.0, 3),
+                        "end": round(end_ms / 1000.0, 3),
+                    })
+    finally:
+        model.vad_model = orig_vad
+
+    return utterances
 
 
 def transcribe_file(model, audio_path: str, args) -> dict:
     """转写单个文件，返回结果 dict。text 字段为列表，每条含 text/start/end。"""
     audio_dur_s = _audio_duration(audio_path)
 
-    generate_kwargs = {}
+    generate_kwargs = {
+        # paraformer: 启用字符级时间戳（其他模型会忽略此参数）
+        "pred_timestamp": True,
+    }
     if args.hotwords:
         generate_kwargs["hotword"] = args.hotwords
     if args.language:
@@ -253,6 +379,28 @@ def transcribe_file(model, audio_path: str, args) -> dict:
     if args.merge_vad:
         generate_kwargs["merge_vad"] = True
         generate_kwargs["merge_length_s"] = args.merge_length_s
+
+    # SenseVoice + VAD：绕过 inference_with_vad 聚合，逐段单独推理，保留各段 start/end
+    is_sensevoice = args.vad_model and re.search(r"sensevoice", args.model, re.IGNORECASE)
+    if is_sensevoice:
+        t0 = time.perf_counter()
+        text_list = _transcribe_sensevoice_segments(model, audio_path, generate_kwargs)
+        elapsed = time.perf_counter() - t0
+        logger.info("[timing] transcribe %s: %.3fs", Path(audio_path).name, elapsed)
+        if audio_dur_s > 0:
+            rtf = elapsed / audio_dur_s
+            logger.info("[RTF]    RTF=%.4f  RTFx=%.2f", rtf, 1 / rtf)
+        rtf = round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None
+        return {
+            "source": audio_path,
+            "filename": os.path.basename(audio_path),
+            "text": text_list,
+            "audio_dur_s": round(audio_dur_s, 3),
+            "transcribe_s": round(elapsed, 3),
+            "rtf": rtf,
+            "rtfx": round(1 / rtf, 2) if rtf else None,
+        }
+
     # 禁止 VAD 合并多段送入 batch，避免 Fun-ASR-Nano 报 batch decoding not implemented
     if args.vad_model:
         generate_kwargs["batch_size_threshold_s"] = 0
@@ -272,15 +420,14 @@ def transcribe_file(model, audio_path: str, args) -> dict:
             raw = item.get("text", "").strip()
             if not raw:
                 continue
+            ts_list = item.get("timestamp") or item.get("timestamps") or []
             cleaned = _clean_text(raw)
             if not cleaned:
                 continue
-            ts_list = item.get("timestamp") or item.get("timestamps") or []
             segs = _split_by_gap(cleaned, ts_list, args.silence_gap)
             if segs:
                 text_list.extend(segs)
             else:
-                # 无时间戳（SenseVoice）：整条保留，start/end 为 null
                 text_list.append({"text": cleaned, "start": None, "end": None})
 
     rtf = round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None
@@ -295,13 +442,34 @@ def transcribe_file(model, audio_path: str, args) -> dict:
     }
 
 
-def save_result(result: dict, audio_path: Path, output_dir: Path, channel: int | None = None):
+def _model_tag(model_name: str, vad_model: str, punc_model: str) -> str:
+    """
+    生成文件名后缀标签，例如：
+      iic/SenseVoiceSmall + fsmn-vad + ""  → "SenseVoiceSmall.fsmn-vad.no-punc"
+      paraformer-zh        + fsmn-vad + ct-punc → "paraformer-zh.fsmn-vad.ct-punc"
+    本地路径取最后一段目录名；名称中 / 替换为 -。
+    """
+    # 取模型名最后一段（兼容 HF 格式 org/model 和本地路径）
+    name = Path(model_name).name or model_name
+    name = name.replace("/", "-")
+    vad_tag = Path(vad_model).name if vad_model else "no-vad"
+    punc_tag = Path(punc_model).name if punc_model else "no-punc"
+    return f"{name}.{vad_tag}.{punc_tag}"
+
+
+def save_result(result: dict, audio_path: Path, output_dir: Path,
+                args=None, channel: int | None = None):
     """将结果写入 JSON 文件。channel 不为 None 时在文件名中附加声道后缀。"""
     base = audio_path.stem
     if channel is not None:
         base = f"{base}_channel{channel}"
+    if args is not None:
+        tag = _model_tag(args.model, args.vad_model or "", args.punc_model or "")
+        filename = f"{base}.{tag}.json"
+    else:
+        filename = f"{base}.funasr.json"
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"{base}.funasr.json"
+    out_path = output_dir / filename
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("[output] 已保存: %s", out_path)
     return out_path
@@ -364,14 +532,14 @@ def main() -> None:
                     result["channel"] = ch
                     logger.info("[channel %d] %d 条结果", ch, len(result["text"]))
 
-                    save_result(result, f, output_dir, channel=ch)
+                    save_result(result, f, output_dir, args=args, channel=ch)
 
                     total_audio_s += result["audio_dur_s"]
                     total_transcribe_s += result["transcribe_s"]
         else:
             result = transcribe_file(model, str(f), args)
             logger.info("[result] %d 条结果", len(result["text"]))
-            save_result(result, f, output_dir)
+            save_result(result, f, output_dir, args=args)
 
             total_audio_s += result["audio_dur_s"]
             total_transcribe_s += result["transcribe_s"]
