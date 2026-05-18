@@ -332,6 +332,7 @@ def main() -> None:
     logger.info("[timing] 模型加载: %.3fs", time.perf_counter() - t0)
 
     all_utterances = []
+    total_transcribe_s = 0.0
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for ch in range(channels_to_process):
@@ -343,6 +344,7 @@ def main() -> None:
             t1 = time.perf_counter()
             utterances = transcribe_channel(model, tmp_wav, args)
             elapsed = time.perf_counter() - t1
+            total_transcribe_s += elapsed
 
             ch_dur = len(channel_audio) / sample_rate
             rtf = elapsed / ch_dur if ch_dur > 0 else 0.0
@@ -362,10 +364,15 @@ def main() -> None:
     # 按开始时间排序，同时刻按声道顺序
     all_utterances.sort(key=lambda u: (u["start"], u["role"]))
 
+    rtf = round(total_transcribe_s / total_dur_s, 4) if total_dur_s > 0 else None
     output = {
         "source": args.input,
         "filename": os.path.basename(args.input),
         "channels": channels_to_process,
+        "audio_dur_s": round(total_dur_s, 3),
+        "transcribe_s": round(total_transcribe_s, 3),
+        "rtf": rtf,
+        "rtfx": round(1 / rtf, 2) if rtf else None,
         "conversations": all_utterances,
     }
 
