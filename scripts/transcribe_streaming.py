@@ -23,7 +23,8 @@ Usage:
   --enable-update         Enable FunASR version check (disabled by default)
   --separate-channel/-sc  Split channels and transcribe each separately
 
-Output format (json):  <stem>.<model>.no-vad.<punc>.json
+Output format (json):  <stem>.streaming.<model>.no-vad.<punc>.json
+                       <stem>.channel0.streaming.<model>.no-vad.<punc>.json  (with --separate-channel)
   {
     "source": "...",
     "filename": "...",
@@ -227,10 +228,10 @@ def save_result(result: dict, audio_path: Path, output_dir: Path, args=None,
     output_dir.mkdir(parents=True, exist_ok=True)
     base = audio_path.stem
     if channel is not None:
-        base = f"{base}_channel{channel}"
+        base = f"{base}.channel{channel}"
     if args is not None:
         tag = _model_tag(args.model, args.punc_model or "")
-        filename = f"{base}.{tag}.json"
+        filename = f"{base}.streaming.{tag}.json"
     else:
         filename = f"{base}.streaming.json"
     out_path = output_dir / filename

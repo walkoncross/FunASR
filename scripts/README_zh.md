@@ -124,7 +124,7 @@ python scripts/transcribe.py -i audio.wav \
 
 - `start` / `end` 单位为秒；SenseVoice 各段 start/end 对应 VAD 段边界
 - `rtf`：实时率（越小越快）；`rtfx`：逆实时率 = `1/rtf`（越大越快）
-- 声道分离模式（`-sc`）时，文件名附加 `_channel0` / `_channel1` 后缀，JSON 中额外包含 `"channel": 0`
+- 声道分离模式（`-sc`）时，文件名添加 `.channel0` / `.channel1` 段，JSON 中额外包含 `"channel": 0`
 
 ---
 
@@ -147,7 +147,7 @@ python scripts/transcribe_conversation.py -i <立体声音频> [OPTIONS]
 | 参数 | 简写 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--input` | `-i` | 必填 | 立体声音频文件 |
-| `--output` | `-o` | `results/<basename>.<model>.<vad>.<punc>.conversation.json` | JSON 输出路径 |
+| `--output` | `-o` | `results/<basename>.conversation.<model>.<vad>.<punc>.json` | JSON 输出路径 |
 | `--model` | `-m` | `paraformer-zh` | ASR 模型名称或本地路径 |
 | `--vad-model` | `-vm` | `fsmn-vad` | VAD 模型名称或路径 |
 | `--punc-model` | `-pm` | `ct-punc` | 标点模型名称或路径，留空则禁用 |
@@ -179,7 +179,7 @@ python scripts/transcribe_conversation.py -i stereo.wav --silence-gap 1.0
 
 ### 输出格式
 
-文件名格式：`<stem>.<model>.<vad>.<punc>.conversation.json`
+文件名格式：`<stem>.conversation.<model>.<vad>.<punc>.json`
 
 ```json
 {
@@ -255,7 +255,7 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 
 ### 输出格式
 
-文件名格式：`<stem>.<model>.no-vad.<punc>.json`（流式无 VAD）
+文件名格式：`<stem>.streaming.<model>.no-vad.<punc>.json`（流式无 VAD）
 
 ```json
 {

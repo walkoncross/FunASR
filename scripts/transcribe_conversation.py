@@ -25,7 +25,7 @@ Usage:
   --merge-vad             Merge short VAD segments (SenseVoice; reduces splitting granularity)
   --merge-length-s        Max duration in seconds to merge VAD segments (default: 15.0, requires --merge-vad)
 
-Output format (json):  <stem>.<model>.<vad>.<punc>.conversation.json
+Output format (json):  <stem>.conversation.<model>.<vad>.<punc>.json
   {
     "source": "...",
     "filename": "...",
@@ -347,7 +347,7 @@ def main() -> None:
         output_path = args.output
     else:
         tag = _model_tag(args.model, args.vad_model or "", args.punc_model or "")
-        output_path = f"results/{basename}.{tag}.conversation.json"
+        output_path = f"results/{basename}.conversation.{tag}.json"
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     logger.info("[config] model=%s  vad=%s  punc=%s", args.model, args.vad_model, args.punc_model)

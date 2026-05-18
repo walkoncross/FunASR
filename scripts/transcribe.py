@@ -23,6 +23,7 @@ Usage:
   --silence-gap/-sg       Silence gap threshold in seconds for splitting; 0 = no splitting (default: 0.5)
 
 Output format (json):  <stem>.<model>.<vad>.<punc>.json
+                       <stem>.channel0.<model>.<vad>.<punc>.json  (with --separate-channel)
   {
     "source": "...",
     "filename": "...",
@@ -492,7 +493,7 @@ def save_result(result: dict, audio_path: Path, output_dir: Path,
     """Write result to a JSON file. Appends channel suffix when channel is not None."""
     base = audio_path.stem
     if channel is not None:
-        base = f"{base}_channel{channel}"
+        base = f"{base}.channel{channel}"
     if args is not None:
         tag = _model_tag(args.model, args.vad_model or "", args.punc_model or "")
         filename = f"{base}.{tag}.json"

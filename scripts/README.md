@@ -124,7 +124,7 @@ Examples:
 
 - `start` / `end` are in seconds; for SenseVoice, they correspond to VAD segment boundaries.
 - `rtf`: real-time factor (lower is faster); `rtfx`: inverse RTF = `1/rtf` (higher is faster).
-- With channel separation (`-sc`), filenames get a `_channel0` / `_channel1` suffix and the JSON includes `"channel": 0`.
+- With channel separation (`-sc`), filenames get a `.channel0` / `.channel1` segment and the JSON includes `"channel": 0`.
 
 ---
 
@@ -147,7 +147,7 @@ python scripts/transcribe_conversation.py -i <stereo_audio> [OPTIONS]
 | Parameter | Short | Default | Description |
 |-----------|-------|---------|-------------|
 | `--input` | `-i` | required | Stereo audio file |
-| `--output` | `-o` | `results/<basename>.<model>.<vad>.<punc>.conversation.json` | JSON output path |
+| `--output` | `-o` | `results/<basename>.conversation.<model>.<vad>.<punc>.json` | JSON output path |
 | `--model` | `-m` | `paraformer-zh` | ASR model name or local path |
 | `--vad-model` | `-vm` | `fsmn-vad` | VAD model name or path |
 | `--punc-model` | `-pm` | `ct-punc` | Punctuation model name or path; leave empty to disable |
@@ -179,7 +179,7 @@ python scripts/transcribe_conversation.py -i stereo.wav --silence-gap 1.0
 
 ### Output Format
 
-Filename format: `<stem>.<model>.<vad>.<punc>.conversation.json`
+Filename format: `<stem>.conversation.<model>.<vad>.<punc>.json`
 
 ```json
 {
@@ -255,7 +255,7 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 
 ### Output Format
 
-Filename format: `<stem>.<model>.no-vad.<punc>.json` (streaming has no VAD)
+Filename format: `<stem>.streaming.<model>.no-vad.<punc>.json`
 
 ```json
 {
