@@ -346,8 +346,9 @@ def main() -> None:
 
             ch_dur = len(channel_audio) / sample_rate
             rtf = elapsed / ch_dur if ch_dur > 0 else 0.0
-            logger.info("[channel %d] %d 段话语  耗时=%.3fs  RTF=%.4f",
-                        ch, len(utterances), elapsed, rtf)
+            rtfx = 1 / rtf if rtf > 0 else 0.0
+            logger.info("[channel %d] %d 段话语  耗时=%.3fs  RTF=%.4f  RTFx=%.2f",
+                        ch, len(utterances), elapsed, rtf, rtfx)
 
             for u in utterances:
                 logger.info("  [%.2f-%.2fs] %r", u["start"], u["end"], u["text"])

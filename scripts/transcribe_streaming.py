@@ -174,6 +174,7 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
     if not final_text:
         final_text = " ".join(c["text"] for c in chunks_out if c["text"])
 
+    rtf = round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None
     return {
         "source": audio_path,
         "filename": os.path.basename(audio_path),
@@ -181,7 +182,8 @@ def transcribe_streaming(model, audio_path: str, args) -> dict:
         "chunks": chunks_out,
         "audio_dur_s": round(audio_dur_s, 3),
         "transcribe_s": round(elapsed, 3),
-        "rtf": round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None,
+        "rtf": rtf,
+        "rtfx": round(1 / rtf, 2) if rtf else None,
     }
 
 
@@ -230,7 +232,7 @@ def main() -> None:
     for i, f in enumerate(files, 1):
         logger.info("\n[%d/%d] 处理: %s", i, len(files), f.name)
         result = transcribe_streaming(model, str(f), args)
-        logger.info("[result] RTF=%.4f  文本: %s", result["rtf"] or 0, result["text"])
+        logger.info("[result] RTF=%.4f  RTFx=%.2f  文本: %s", result["rtf"] or 0, result["rtfx"] or 0, result["text"])
         save_result(result, f, output_dir)
 
         total_audio_s += result["audio_dur_s"]
@@ -240,7 +242,8 @@ def main() -> None:
     logger.info("[summary] 总音频时长: %.1fs", total_audio_s)
     logger.info("[summary] 总转写耗时: %.1fs", total_transcribe_s)
     if total_audio_s > 0:
-        logger.info("[summary] 整体 RTF: %.4f", total_transcribe_s / total_audio_s)
+        overall_rtf = total_transcribe_s / total_audio_s
+        logger.info("[summary] 整体 RTF: %.4f  RTFx: %.2f", overall_rtf, 1 / overall_rtf)
 
 
 if __name__ == "__main__":

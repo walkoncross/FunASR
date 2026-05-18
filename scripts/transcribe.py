@@ -95,7 +95,7 @@ def _timed(label: str, fn, *args, audio_dur_s: float = 0.0, **kwargs):
     logger.info("[timing] %s: %.3fs", label, elapsed)
     if audio_dur_s > 0:
         rtf = elapsed / audio_dur_s
-        logger.info("[RTF]    RTF=%.4f，即每秒可处理 %.2f 秒音频", rtf, 1 / rtf)
+        logger.info("[RTF]    RTF=%.4f  RTFx=%.2f", rtf, 1 / rtf)
     return result, elapsed
 
 
@@ -283,13 +283,15 @@ def transcribe_file(model, audio_path: str, args) -> dict:
                 # 无时间戳（SenseVoice）：整条保留，start/end 为 null
                 text_list.append({"text": cleaned, "start": None, "end": None})
 
+    rtf = round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None
     return {
         "source": audio_path,
         "filename": os.path.basename(audio_path),
         "text": text_list,
         "audio_dur_s": round(audio_dur_s, 3),
         "transcribe_s": round(elapsed, 3),
-        "rtf": round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None,
+        "rtf": rtf,
+        "rtfx": round(1 / rtf, 2) if rtf else None,
     }
 
 
@@ -380,7 +382,7 @@ def main() -> None:
     logger.info("[summary] 总转写耗时: %.1fs", total_transcribe_s)
     if total_audio_s > 0:
         overall_rtf = total_transcribe_s / total_audio_s
-        logger.info("[summary] 整体 RTF: %.4f", overall_rtf)
+        logger.info("[summary] 整体 RTF: %.4f  RTFx: %.2f", overall_rtf, 1 / overall_rtf)
 
 
 if __name__ == "__main__":
