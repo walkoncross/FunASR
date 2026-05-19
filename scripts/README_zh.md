@@ -9,6 +9,7 @@
 | `transcribe.py` | 单文件或批量非流式转写，支持多声道分离 |
 | `transcribe_conversation.py` | 双声道对话转写，输出带时间戳的多轮对话 JSON |
 | `transcribe_streaming.py` | 流式转写，逐块实时输出识别结果 |
+| `transcribe_streaming_with_vad.py` | 模拟在线双声道流式转写（VAD + 流式 ASR），适用于 AI 外呼 / AI 客服 |
 
 ### 快捷脚本（按模型预设参数）
 
@@ -23,7 +24,8 @@
 | `transcribe_conversation_by_nano.sh` | Fun-ASR-Nano-2512 | 带 | 双声道对话转写 |
 | `transcribe_conversation_by_sensevoice.sh` | SenseVoiceSmall | 带 | 双声道对话转写，多语言 |
 | `transcribe_conversation_by_paraformer.sh` | paraformer-zh | 带 | 双声道对话转写，精度最高 |
-| `transcribe_streaming_by_paraformer.sh` | paraformer-zh-streaming | — | 流式转写 |
+| `transcribe_streaming_by_paraformer.sh` | paraformer-zh-streaming | — | 流式转写（文件模拟） |
+| `transcribe_streaming_with_vad_by_paraformer.sh` | paraformer-zh-streaming + fsmn-vad | 带 | 模拟在线双声道流式转写 |
 
 ---
 
@@ -214,6 +216,11 @@ python scripts/transcribe_conversation.py -i stereo.wav --silence-gap 1.0
 
 流式语音转写，使用 paraformer-zh-streaming 逐块实时输出识别结果，模拟低延迟 ASR 场景。
 
+> **关于 VAD**：本脚本处理的是已录制的音频文件，直接按固定 chunk 切块推理，无需 VAD。
+> 若对接真实在线场景（麦克风流、电话 RTP 流），需在上游加 VAD（如 fsmn-vad）检测说话起止，
+> 典型链路为：`音频流 → fsmn-vad（端点检测）→ 有效语音段 → paraformer-zh-streaming → 文本`，
+> VAD 同时承担"用户是否说完"的判断，用于触发 AI 回复。
+
 ### 用法
 
 ```bash
@@ -232,26 +239,34 @@ python scripts/transcribe_streaming.py -i <音频文件或目录> [OPTIONS]
 | `--punc-model` | `-pm` | `ct-punc` | 标点模型名称或路径，留空则禁用 |
 | `--hub` | | `modelscope` | 模型来源：`modelscope` / `hf` |
 | `--device` | `-d` | `cpu` | 推理设备：`cpu` / `cuda:0` / `mps` |
-| `--chunk-size` | | `0 10 5` | 流式分块配置 `[lookahead chunk shift]`，单位帧（60ms）。`0 10 5` = 600ms chunk / 300ms lookahead |
-| `--encoder-look-back` | | `4` | Encoder self-attention 回看 chunk 数 |
-| `--decoder-look-back` | | `1` | Decoder cross-attention 回看 encoder chunk 数 |
+| `--chunk-size` | | `0 8 4` | 流式分块配置 `[lookahead chunk shift]`，单位帧（60ms）。默认 `0 8 4` = 480ms chunk / 240ms lookahead（实时场景） |
+| `--encoder-look-back` | | `4` | Encoder self-attention 回看 chunk 数。实时场景用 `4`，离线批量用 `8` |
+| `--decoder-look-back` | | `1` | Decoder cross-attention 回看 encoder chunk 数。实时场景用 `1`，离线批量用 `2` |
 | `--hotwords` | | `None` | 热词字符串，空格分隔 |
 | `--enable-update` | | `False` | 启用 FunASR PyPI 版本检查 |
 | `--separate-channel` | `-sc` | `False` | 分声道独立转写 |
 
-**chunk-size 说明**：`[lookahead, chunk, shift]`，单位为帧（1 帧 = 60ms）。
-- `0 10 5`：600ms chunk，300ms lookahead（默认，平衡延迟与精度）
-- `0 8 4`：480ms chunk，240ms lookahead（更低延迟）
+**chunk-size 配置档位**：`[lookahead, chunk, shift]`，单位为帧（1 帧 = 60ms）。
+
+| 配置 | chunk 窗口 | look-ahead | encoder-look-back | decoder-look-back | 适用场景 |
+|------|-----------|-----------|-------------------|-------------------|---------|
+| `0 8 4` | 480ms | 240ms | 4 | 1 | **在线 AI 外呼 / AI 客服**（默认，低延迟优先） |
+| `0 10 5` | 600ms | 300ms | 4 | 1 | 平衡延迟与精度 |
+| `0 16 8` | 960ms | 480ms | 8 | 2 | 离线批量处理（精度优先） |
+
+> 延迟越低，每次推理可用上下文越短，识别准确率相应略降；离线批量处理时推荐使用 `0 16 8 + encoder-look-back 8 + decoder-look-back 2`。
 
 ### 示例
 
 ```bash
-# 默认 600ms 分块
+# 在线 AI 外呼 / AI 客服（默认，低延迟）
 python scripts/transcribe_streaming.py -i audio.wav -d mps
 
-# 480ms 低延迟模式
+# 离线批量处理（精度优先）
 python scripts/transcribe_streaming.py -i audio.wav -d mps \
-  --chunk-size 0 8 4
+  --chunk-size 0 16 8 \
+  --encoder-look-back 8 \
+  --decoder-look-back 2
 ```
 
 ### 输出格式
@@ -286,7 +301,90 @@ python scripts/transcribe_streaming.py -i audio.wav -d mps \
 }
 ```
 
-最终文本（`text`）取 `is_final=true` 块的输出；`chunks` 记录每块的实时输出，可用于分析流式延迟。
+最终文本（`text`）为所有 chunk 输出拼接；`chunks` 记录每块的实时输出，可用于分析流式延迟。
+
+---
+
+## transcribe_streaming_with_vad.py
+
+模拟在线双声道流式转写，使用 **fsmn-vad + paraformer-zh-streaming** 构建完整的端点检测→流式 ASR 链路，面向 AI 外呼和 AI 客服场景。
+
+### 与 transcribe_streaming.py 的区别
+
+| 维度 | transcribe_streaming.py | transcribe_streaming_with_vad.py |
+|------|------------------------|----------------------------------|
+| VAD | 无，固定 chunk 切块 | fsmn-vad 端点检测，仅语音段送 ASR |
+| 场景 | 已录制文件的批量模拟 | 模拟在线实时双路电话流 |
+| 声道处理 | 各 channel 独立跑完整文件 | 两路共享时间轴，独立 VAD/ASR 状态 |
+| 输出结构 | 平铺 chunks 列表 | 带 `role/start_s/end_s` 的对话轮次 |
+| flush 触发 | 文件末尾 is_final | VAD 检测到段尾即 flush（模拟"用户说完"信号） |
+
+### 架构
+
+```
+wall-clock 推进（每步 max(asr_chunk_stride, vad_chunk_samples)）
+    │
+    ├── channel 0 (user / 客户)
+    │       └── fsmn-vad  ──→ 检测到说话开始：开始累积 speech_buf
+    │                    ──→ 检测到说话结束：ASR flush → utterance 输出
+    │
+    └── channel 1 (agent / 坐席)
+            └── fsmn-vad  ──→ 同上（独立 vad_cache / asr_cache）
+                                            │
+                                两路 utterances 按 start_s 排序合并
+```
+
+VAD 检测到"说话结束"是 AI 外呼/客服中**决定何时回复**的关键信号，本脚本通过 `is_final=True` 触发 ASR flush 来模拟这一行为。
+
+### 用法
+
+```bash
+python scripts/transcribe_streaming_with_vad.py -i <音频文件或目录> [OPTIONS]
+# 或使用快捷脚本
+./scripts/transcribe_streaming_with_vad_by_paraformer.sh <音频文件或目录>
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--input` | `-i` | 必填 | 音频文件或目录（需双声道） |
+| `--output` | `-o` | `./results/` | 输出目录 |
+| `--model` | `-m` | `paraformer-zh-streaming` | 流式 ASR 模型 |
+| `--vad-model` | `-vm` | `fsmn-vad` | VAD 模型 |
+| `--punc-model` | `-pm` | `ct-punc` | 标点模型，留空则禁用 |
+| `--hub` | | `modelscope` | 模型来源：`modelscope` / `hf` |
+| `--device` | `-d` | `cpu` | 推理设备：`cpu` / `cuda:0` / `mps` |
+| `--chunk-size` | | `0 8 4` | ASR 分块配置，同 transcribe_streaming.py |
+| `--encoder-look-back` | | `4` | Encoder self-attention 回看 chunk 数 |
+| `--decoder-look-back` | | `1` | Decoder cross-attention 回看 encoder chunk 数 |
+| `--vad-chunk-ms` | | `200` | VAD 每次处理的窗口大小（ms） |
+| `--hotwords` | | `None` | 热词字符串，空格分隔 |
+| `--enable-update` | | `False` | 启用 FunASR PyPI 版本检查 |
+
+### 输出格式
+
+文件名格式：`<stem>.streaming-vad.<asr>.<vad>.<punc>.json`
+
+```json
+{
+  "source": "/path/to/audio.wav",
+  "filename": "audio.wav",
+  "audio_dur_s": 306.68,
+  "transcribe_s": 12.34,
+  "rtf": 0.040,
+  "rtfx": 24.87,
+  "asr_model": "paraformer-zh-streaming",
+  "vad_model": "fsmn-vad",
+  "punc_model": "ct-punc",
+  "conversations": [
+    {"role": "user",  "text": "你好，我想取消订单", "start_s": 17.17, "end_s": 19.50},
+    {"role": "agent", "text": "好的，请稍等",       "start_s": 20.10, "end_s": 21.30}
+  ]
+}
+```
+
+`conversations` 结构与 `transcribe_conversation.py` 的输出格式对齐（均含 `role/text/start_s/end_s`），下游分析代码可复用。
 
 ---
 

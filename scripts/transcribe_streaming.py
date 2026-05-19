@@ -16,7 +16,7 @@ Usage:
   --hub                   Model source: modelscope / hf (default: modelscope)
   --device/-d             Inference device: cpu / cuda:0 / mps (default: cpu)
   --chunk-size            Streaming chunk config [lookahead, chunk, shift] in frames (60ms each)
-                          (default: 0 10 5, i.e. 600ms chunk / 300ms lookahead)
+                          (default: 0 8 4, i.e. 480ms chunk / 240ms look-ahead, real-time profile)
   --encoder-look-back     Number of encoder self-attention look-back chunks (default: 4)
   --decoder-look-back     Number of decoder cross-attention look-back encoder chunks (default: 1)
   --hotwords              Hotwords string, space-separated
@@ -43,7 +43,9 @@ Output format (json):  <stem>.streaming.<model>.no-vad.<punc>.json
     "punc_model": "ct-punc",
     "text": "full transcription text",
     "chunks": [
-      {"chunk": 0, "is_final": false, "text": "partial result"},
+      {"chunk": 0, "is_final": false, "text": "partial result",
+       "audio_dur_s": 0.48, "transcribe_s": 0.05, "rtf": 0.104, "rtfx": 9.6,
+       "vad_s": null, "vad_rtf": null, "vad_rtfx": null, "latency_ms": 50.0},
       ...
     ]
   }
@@ -52,6 +54,7 @@ Output format (json):  <stem>.streaming.<model>.no-vad.<punc>.json
 """
 
 import argparse
+import csv
 import json
 import logging
 import os
@@ -72,6 +75,21 @@ logger = logging.getLogger(__name__)
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".mp4", ".aac"}
 FRAME_MS = 60          # paraformer-zh-streaming: 60ms per frame
 SAMPLE_RATE = 16000    # model fixed sample rate
+
+
+def _percentiles(values: list[float]) -> dict:
+    """Compute P50/P90/P95/P99 from a list of float values. Returns {} if empty."""
+    if not values:
+        return {}
+    s = sorted(values)
+    n = len(s)
+
+    def _p(pct: float) -> float:
+        idx = pct / 100 * (n - 1)
+        lo, hi = int(idx), min(int(idx) + 1, n - 1)
+        return round(s[lo] + (s[hi] - s[lo]) * (idx - lo), 2)
+
+    return {"p50": _p(50), "p90": _p(90), "p95": _p(95), "p99": _p(99)}
 
 
 def _model_tag(model_name: str, punc_model: str) -> str:
@@ -97,14 +115,18 @@ def parse_args() -> argparse.Namespace:
                         help="Model source: modelscope or hf (HuggingFace)")
     parser.add_argument("--device", "-d", default="cpu",
                         help="Inference device: cpu / cuda:0 / mps")
-    parser.add_argument("--chunk-size", nargs=3, type=int, default=[0, 10, 5],
+    parser.add_argument("--chunk-size", nargs=3, type=int, default=[0, 8, 4],
                         metavar=("LOOKAHEAD", "CHUNK", "SHIFT"),
                         help="Streaming chunk config [lookahead chunk shift] in frames (60ms each). "
-                             "[0,10,5]=600ms chunk/300ms lookahead; [0,8,4]=480ms/240ms")
+                             "[0,8,4]=480ms chunk/240ms look-ahead (real-time, lower latency); "
+                             "[0,10,5]=600ms chunk/300ms look-ahead (balanced); "
+                             "[0,16,8]=960ms chunk/480ms look-ahead (offline-batch, higher accuracy)")
     parser.add_argument("--encoder-look-back", type=int, default=4,
-                        help="Number of encoder self-attention look-back chunks")
+                        help="Number of encoder self-attention look-back chunks "
+                             "(default 4 for real-time; use 8 for offline-batch accuracy)")
     parser.add_argument("--decoder-look-back", type=int, default=1,
-                        help="Number of decoder cross-attention look-back encoder chunks")
+                        help="Number of decoder cross-attention look-back encoder chunks "
+                             "(default 1 for real-time; use 2 for offline-batch accuracy)")
     parser.add_argument("--hotwords", default=None, help="Hotwords string, space-separated")
     parser.add_argument("--enable-update", action="store_true", default=False,
                         help="Enable FunASR version check (disabled by default)")
@@ -171,12 +193,14 @@ def _stream_one_channel(model, speech, sample_rate: int, args) -> dict:
 
     cache = {}
     chunks_out = []
+    chunk_latencies: list[float] = []  # latency_ms per chunk (all chunks, not just non-empty)
 
     t0 = time.perf_counter()
     for i in range(total_chunk_num):
         speech_chunk = speech[i * chunk_stride: (i + 1) * chunk_stride]
         is_final = (i == total_chunk_num - 1)
 
+        t_chunk = time.perf_counter()
         res = model.generate(
             input=speech_chunk,
             cache=cache,
@@ -185,16 +209,33 @@ def _stream_one_channel(model, speech, sample_rate: int, args) -> dict:
             encoder_chunk_look_back=encoder_look_back,
             decoder_chunk_look_back=decoder_look_back,
         )
+        latency_ms = round((time.perf_counter() - t_chunk) * 1000, 2)
 
         text = ""
         if res and isinstance(res, list):
             text = res[0].get("text", "").strip()
 
-        chunks_out.append({"chunk": i, "is_final": is_final, "text": text})
+        chunk_audio_dur_s = len(speech_chunk) / sample_rate
+        chunk_transcribe_s = round(latency_ms / 1000, 6)
+        chunk_rtf = round(chunk_transcribe_s / chunk_audio_dur_s, 4) if chunk_audio_dur_s > 0 else None
+        chunks_out.append({
+            "chunk": i,
+            "is_final": is_final,
+            "text": text,
+            "audio_dur_s": round(chunk_audio_dur_s, 4),
+            "transcribe_s": chunk_transcribe_s,
+            "rtf": chunk_rtf,
+            "rtfx": round(1 / chunk_rtf, 2) if chunk_rtf else None,
+            "vad_s": None,
+            "vad_rtf": None,
+            "vad_rtfx": None,
+            "latency_ms": latency_ms,
+        })
+        chunk_latencies.append(latency_ms)
 
         if text:
             status = "[FINAL]" if is_final else f"[{i:04d}]"
-            logger.info("  %s %s", status, text)
+            logger.info("  %s %s  (%.1fms)", status, text, latency_ms)
 
     elapsed = time.perf_counter() - t0
 
@@ -202,6 +243,7 @@ def _stream_one_channel(model, speech, sample_rate: int, args) -> dict:
     final_text = "".join(c["text"] for c in chunks_out if c["text"])
 
     rtf = round(elapsed / audio_dur_s, 4) if audio_dur_s > 0 else None
+    latency_percentiles = _percentiles(chunk_latencies)
     return {
         "audio_dur_s": round(audio_dur_s, 3),
         "transcribe_s": round(elapsed, 3),
@@ -216,6 +258,7 @@ def _stream_one_channel(model, speech, sample_rate: int, args) -> dict:
         "model_name": Path(args.model).name or args.model,
         "vad_model": None,
         "punc_model": Path(args.punc_model).name if args.punc_model else None,
+        "chunk_latency_ms": latency_percentiles,
         "text": final_text,
         "chunks": chunks_out,
     }
@@ -229,12 +272,41 @@ def save_result(result: dict, audio_path: Path, output_dir: Path, args=None,
         base = f"{base}.channel{channel}"
     if args is not None:
         tag = _model_tag(args.model, args.punc_model or "")
-        filename = f"{base}.streaming.{tag}.json"
+        stem = f"{base}.streaming.{tag}"
     else:
-        filename = f"{base}.streaming.json"
-    out_path = output_dir / filename
+        stem = f"{base}.streaming"
+
+    # JSON result
+    out_path = output_dir / f"{stem}.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("[output] saved: %s", out_path)
+
+    # Latency CSV — one row per chunk
+    csv_path = output_dir / f"{stem}.latency.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "chunk_id", "is_final", "has_text",
+            "audio_dur_s", "transcribe_s", "rtf", "rtfx",
+            "vad_s", "vad_rtf", "vad_rtfx",
+            "latency_ms",
+        ])
+        writer.writeheader()
+        for c in result.get("chunks", []):
+            writer.writerow({
+                "chunk_id": c["chunk"],
+                "is_final": c["is_final"],
+                "has_text": bool(c["text"]),
+                "audio_dur_s": c.get("audio_dur_s", ""),
+                "transcribe_s": c.get("transcribe_s", ""),
+                "rtf": c.get("rtf", ""),
+                "rtfx": c.get("rtfx", ""),
+                "vad_s": c.get("vad_s", ""),
+                "vad_rtf": c.get("vad_rtf", ""),
+                "vad_rtfx": c.get("vad_rtfx", ""),
+                "latency_ms": c.get("latency_ms", ""),
+            })
+    logger.info("[output] saved: %s", csv_path)
+
     return out_path
 
 

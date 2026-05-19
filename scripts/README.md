@@ -9,6 +9,7 @@ Speech transcription scripts based on [FunASR](https://github.com/modelscope/Fun
 | `transcribe.py` | Single-file or batch non-streaming transcription with multi-channel support |
 | `transcribe_conversation.py` | Two-channel conversation transcription; outputs timestamped multi-turn dialogue JSON |
 | `transcribe_streaming.py` | Streaming transcription; outputs recognition results in real time, chunk by chunk |
+| `transcribe_streaming_with_vad.py` | Simulated-online two-channel streaming with VAD + streaming ASR; designed for AI outbound / AI customer service |
 
 ### Shortcut Scripts (model-preset parameters)
 
@@ -23,7 +24,8 @@ Speech transcription scripts based on [FunASR](https://github.com/modelscope/Fun
 | `transcribe_conversation_by_nano.sh` | Fun-ASR-Nano-2512 | yes | Two-channel conversation transcription |
 | `transcribe_conversation_by_sensevoice.sh` | SenseVoiceSmall | yes | Two-channel conversation, multilingual |
 | `transcribe_conversation_by_paraformer.sh` | paraformer-zh | yes | Two-channel conversation, highest accuracy |
-| `transcribe_streaming_by_paraformer.sh` | paraformer-zh-streaming | — | Streaming transcription |
+| `transcribe_streaming_by_paraformer.sh` | paraformer-zh-streaming | — | Streaming transcription (file simulation) |
+| `transcribe_streaming_with_vad_by_paraformer.sh` | paraformer-zh-streaming + fsmn-vad | yes | Simulated-online two-channel streaming |
 
 ---
 
@@ -214,6 +216,12 @@ Filename format: `<stem>.conversation.<model>.<vad>.<punc>.json`
 
 Streaming speech transcription using paraformer-zh-streaming. Feeds audio in fixed-size chunks and outputs recognition results in real time, simulating a low-latency ASR scenario.
 
+> **On VAD**: This script processes pre-recorded audio files and feeds them in fixed-size chunks — no VAD is needed.
+> For real online deployments (microphone stream, telephone RTP stream), add VAD (e.g. fsmn-vad) upstream
+> to detect speech boundaries. Typical pipeline:
+> `audio stream → fsmn-vad (endpoint detection) → speech segments → paraformer-zh-streaming → text`
+> VAD also signals "user has finished speaking", which triggers the AI to respond.
+
 ### Usage
 
 ```bash
@@ -232,26 +240,34 @@ python scripts/transcribe_streaming.py -i <audio_file_or_dir> [OPTIONS]
 | `--punc-model` | `-pm` | `ct-punc` | Punctuation model name or path; leave empty to disable |
 | `--hub` | | `modelscope` | Model source: `modelscope` / `hf` |
 | `--device` | `-d` | `cpu` | Inference device: `cpu` / `cuda:0` / `mps` |
-| `--chunk-size` | | `0 10 5` | Streaming chunk config `[lookahead chunk shift]` in frames (60ms each). `0 10 5` = 600ms chunk / 300ms lookahead |
-| `--encoder-look-back` | | `4` | Number of encoder self-attention look-back chunks |
-| `--decoder-look-back` | | `1` | Number of decoder cross-attention look-back encoder chunks |
+| `--chunk-size` | | `0 8 4` | Streaming chunk config `[lookahead chunk shift]` in frames (60ms each). Default `0 8 4` = 480ms chunk / 240ms lookahead (real-time profile) |
+| `--encoder-look-back` | | `4` | Number of encoder self-attention look-back chunks. Use `4` for real-time; `8` for offline-batch |
+| `--decoder-look-back` | | `1` | Number of decoder cross-attention look-back encoder chunks. Use `1` for real-time; `2` for offline-batch |
 | `--hotwords` | | `None` | Hotwords string, space-separated |
 | `--enable-update` | | `False` | Enable FunASR PyPI version check |
 | `--separate-channel` | `-sc` | `False` | Split channels and transcribe each separately |
 
-**chunk-size explained**: `[lookahead, chunk, shift]`, where 1 frame = 60ms.
-- `0 10 5`: 600ms chunk, 300ms lookahead (default — balanced latency and accuracy)
-- `0 8 4`: 480ms chunk, 240ms lookahead (lower latency)
+**chunk-size profiles**: `[lookahead, chunk, shift]`, where 1 frame = 60ms.
+
+| Config | Chunk window | Look-ahead | encoder-look-back | decoder-look-back | Use case |
+|--------|-------------|-----------|-------------------|-------------------|----------|
+| `0 8 4` | 480ms | 240ms | 4 | 1 | **Online AI outbound / AI customer service** (default — low latency) |
+| `0 10 5` | 600ms | 300ms | 4 | 1 | Balanced latency and accuracy |
+| `0 16 8` | 960ms | 480ms | 8 | 2 | Offline batch processing (accuracy first) |
+
+> Shorter chunks reduce available context per inference, which may slightly lower accuracy. For offline batch use, prefer `0 16 8` with `--encoder-look-back 8 --decoder-look-back 2`.
 
 ### Examples
 
 ```bash
-# Default 600ms chunks
+# Online AI outbound / AI customer service (default — low latency)
 python scripts/transcribe_streaming.py -i audio.wav -d mps
 
-# 480ms low-latency mode
+# Offline batch processing (accuracy first)
 python scripts/transcribe_streaming.py -i audio.wav -d mps \
-  --chunk-size 0 8 4
+  --chunk-size 0 16 8 \
+  --encoder-look-back 8 \
+  --decoder-look-back 2
 ```
 
 ### Output Format
@@ -286,7 +302,90 @@ With `--separate-channel`: `<stem>.channel0.streaming.<model>.no-vad.<punc>.json
 }
 ```
 
-The final `text` field is taken from the `is_final=true` chunk. `chunks` records the real-time output of each chunk and can be used to analyze streaming latency.
+The final `text` field is the concatenation of all chunk outputs. `chunks` records the real-time output of each chunk and can be used to analyze streaming latency.
+
+---
+
+## transcribe_streaming_with_vad.py
+
+Simulated-online two-channel streaming transcription using **fsmn-vad + paraformer-zh-streaming**. Builds a complete endpoint-detection → streaming ASR pipeline targeting AI outbound calling and AI customer service scenarios.
+
+### Difference from transcribe_streaming.py
+
+| Dimension | transcribe_streaming.py | transcribe_streaming_with_vad.py |
+|-----------|------------------------|----------------------------------|
+| VAD | None — fixed-size chunk slicing | fsmn-vad endpoint detection; only speech segments fed to ASR |
+| Scenario | Batch simulation on pre-recorded files | Simulated real-time dual-channel phone stream |
+| Channel handling | Each channel processes the full file independently | Both channels share a wall-clock timeline; independent VAD/ASR state per channel |
+| Output structure | Flat list of chunks | Conversation turns with `role / start_s / end_s` |
+| Flush trigger | `is_final` at end of file | VAD end-of-speech event triggers ASR flush (simulates "user finished speaking") |
+
+### Architecture
+
+```
+wall-clock advances (step = max(asr_chunk_stride, vad_chunk_samples))
+    │
+    ├── channel 0 (user / 客户)
+    │       └── fsmn-vad  ──→ speech start: begin buffering speech_buf
+    │                    ──→ speech end:   ASR flush → emit utterance
+    │
+    └── channel 1 (agent / 坐席)
+            └── fsmn-vad  ──→ same (independent vad_cache / asr_cache)
+                                            │
+                                utterances from both channels merged by start_s
+```
+
+The VAD "end-of-speech" event is the key signal in AI outbound/customer service for **deciding when to reply**. This script simulates that by triggering `is_final=True` on the ASR model whenever VAD detects a speech segment boundary.
+
+### Usage
+
+```bash
+python scripts/transcribe_streaming_with_vad.py -i <audio_file_or_dir> [OPTIONS]
+# or use a shortcut script
+./scripts/transcribe_streaming_with_vad_by_paraformer.sh <audio_file_or_dir>
+```
+
+### Parameters
+
+| Parameter | Short | Default | Description |
+|-----------|-------|---------|-------------|
+| `--input` | `-i` | required | Audio file or directory (two-channel required) |
+| `--output` | `-o` | `./results/` | Output directory |
+| `--model` | `-m` | `paraformer-zh-streaming` | Streaming ASR model |
+| `--vad-model` | `-vm` | `fsmn-vad` | VAD model |
+| `--punc-model` | `-pm` | `ct-punc` | Punctuation model; leave empty to disable |
+| `--hub` | | `modelscope` | Model source: `modelscope` / `hf` |
+| `--device` | `-d` | `cpu` | Inference device: `cpu` / `cuda:0` / `mps` |
+| `--chunk-size` | | `0 8 4` | ASR chunk config — same as transcribe_streaming.py |
+| `--encoder-look-back` | | `4` | Encoder self-attention look-back chunks |
+| `--decoder-look-back` | | `1` | Decoder cross-attention look-back encoder chunks |
+| `--vad-chunk-ms` | | `200` | VAD processing window size in ms |
+| `--hotwords` | | `None` | Hotwords string, space-separated |
+| `--enable-update` | | `False` | Enable FunASR PyPI version check |
+
+### Output Format
+
+Filename: `<stem>.streaming-vad.<asr>.<vad>.<punc>.json`
+
+```json
+{
+  "source": "/path/to/audio.wav",
+  "filename": "audio.wav",
+  "audio_dur_s": 306.68,
+  "transcribe_s": 12.34,
+  "rtf": 0.040,
+  "rtfx": 24.87,
+  "asr_model": "paraformer-zh-streaming",
+  "vad_model": "fsmn-vad",
+  "punc_model": "ct-punc",
+  "conversations": [
+    {"role": "user",  "text": "你好，我想取消订单", "start_s": 17.17, "end_s": 19.50},
+    {"role": "agent", "text": "好的，请稍等",       "start_s": 20.10, "end_s": 21.30}
+  ]
+}
+```
+
+The `conversations` structure is aligned with `transcribe_conversation.py` output (same `role / text / start_s / end_s` fields), so downstream analysis code can be reused across both scripts.
 
 ---
 
