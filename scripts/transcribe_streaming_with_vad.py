@@ -374,6 +374,10 @@ def simulate_online(asr_model, vad_model, audio_data: np.ndarray,
             if vad_res and isinstance(vad_res, list) and vad_res[0].get("value"):
                 segments = vad_res[0]["value"]
 
+            # Accumulate VAD time once per wall_step (not per segment entry)
+            # to avoid double-counting when a chunk contains multiple VAD events.
+            vad_counted = False
+
             for seg in segments:
                 seg_start_ms, seg_end_ms = seg
 
@@ -385,8 +389,9 @@ def simulate_online(asr_model, vad_model, audio_data: np.ndarray,
                                  ch, state.role, abs_start / sample_rate)
 
                 if state.in_speech:
-                    # Accumulate VAD time for this chunk while in speech
-                    state.seg_vad_elapsed_ms += vad_chunk_ms
+                    if not vad_counted:
+                        state.seg_vad_elapsed_ms += vad_chunk_ms
+                        vad_counted = True
 
                     if seg_end_ms >= 0:
                         # VAD signals end-of-speech — flush ASR with is_final=True
@@ -418,7 +423,8 @@ def simulate_online(asr_model, vad_model, audio_data: np.ndarray,
             if is_last_wall_chunk and state.in_speech:
                 abs_end = n_samples
                 seg_samples = abs_end - (state.seg_start_sample or 0)
-                state.seg_vad_elapsed_ms += vad_chunk_ms  # count last VAD chunk
+                if not vad_counted:
+                    state.seg_vad_elapsed_ms += vad_chunk_ms
                 if seg_samples >= min_speech_samples:
                     final_chunk_ms = _run_asr_chunk(asr_model, state, pcm, True, args)
                     state.seg_asr_elapsed_ms += final_chunk_ms
